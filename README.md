@@ -5,12 +5,14 @@ OpenAI-compatible AI gateway that reduces LLM costs with smart routing, caching,
 ## Why Costguard?
 
 AI applications often:
+
 - Overuse expensive models
 - Regenerate identical responses
 - Have no visibility into cost per request
 - Lack budget guardrails
 
 Costguard sits between your app and your LLM provider to:
+
 - Route requests intelligently
 - Cache repeated prompts
 - Track token usage and estimated cost
@@ -33,17 +35,20 @@ Costguard is designed to be a lightweight, drop-in gateway.
 ## Roadmap
 
 ### Phase A – Developer Tool
+
 - Lightweight gateway
 - Memory cache
 - Basic routing rules
 
 ### Phase B – Enterprise
+
 - Budget guardrails
 - Team/project quotas
 - Audit logs
 - Redis support
 
 ### Phase C – Managed Cloud
+
 - Hosted control plane
 - Multi-tenant dashboard
 - SLA & analytics
@@ -51,5 +56,3 @@ Costguard is designed to be a lightweight, drop-in gateway.
 ---
 
 More documentation coming soon.
-
-test
