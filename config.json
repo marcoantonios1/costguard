@@ -1,0 +1,26 @@
+{
+  "server": { "addr": ":8080" },
+  "logging": { "level": "info", "json": true },
+  "cache": { "enabled": false, "ttl": "30s", "max_keys": 10000 },
+  "routing": {
+    "default_provider": "openai_primary",
+    "fallback_provider": "openai_backup",
+    "model_to_provider": {
+      "gpt-4o-mini": "openai_primary"
+    }
+  },
+  "providers": {
+    "openai": {
+      "openai_primary": {
+        "base_url": "https://api.openai.com",
+        "api_key": "env:OPENAI_API_KEY",
+        "timeout": "60s"
+      },
+      "openai_backup": {
+        "base_url": "https://api.openai.com",
+        "api_key": "env:OPENAI_API_KEY",
+        "timeout": "60s"
+      }
+    }
+  }
+}
