@@ -25,9 +25,7 @@ type App struct {
 	server *server.Server
 }
 
-func New(cfg config.Config) (*App, error) {
-	log := logging.New(cfg.Logging)
-
+func New(cfg config.Config, log *logging.Log) (*App, error) {
 	// Provider registry
 	reg := providers.NewRegistry()
 
@@ -42,6 +40,7 @@ func New(cfg config.Config) (*App, error) {
 			Timeout: p.Timeout,
 		})
 		if err != nil {
+			log.Error("failed_to_create_openai_client", map[string]any{"name": name, "error": err})
 			return nil, err
 		}
 		reg.Register(name, adapter)
@@ -58,6 +57,7 @@ func New(cfg config.Config) (*App, error) {
 		Registry: reg,
 	})
 	if err != nil {
+		log.Error("failed_to_create_gateway", map[string]any{"error": err})
 		return nil, err
 	}
 
@@ -102,6 +102,7 @@ func (a *App) Run() error {
 		defer cancel()
 		return a.server.Shutdown(ctx)
 	case err := <-errCh:
+		a.log.Error("server_error", map[string]any{"error": err})
 		return err
 	}
 }
