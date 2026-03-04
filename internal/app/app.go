@@ -68,7 +68,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 	openai_http.Register(mux, openai_http.Deps{Gateway: gw})
 
 	// wrap middleware
-	handler := openai_http.LoggingMiddleware(log, mux)
+	handler := server.LoggingMiddleware(log, mux)
 
 	srv := server.NewServer(server.Deps{
 		Addr:    cfg.Server.Addr,
