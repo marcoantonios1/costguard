@@ -7,6 +7,7 @@ import (
 
 	"github.com/marcoantonios1/costguard/internal/app"
 	"github.com/marcoantonios1/costguard/internal/config"
+	"github.com/marcoantonios1/costguard/internal/logging"
 )
 
 func main() {
@@ -19,12 +20,15 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	a, err := app.New(cfg)
+	lg := logging.New(cfg.Logging)
+	a, err := app.New(cfg, lg)
 	if err != nil {
-		log.Fatalf("init app: %v", err)
+		lg.Error("failed_to_create_app", map[string]any{"error": err})
+		os.Exit(1)
 	}
 
 	if err := a.Run(); err != nil {
+		lg.Error("app_error", map[string]any{"error": err})
 		_, _ = os.Stderr.WriteString(err.Error() + "\n")
 		os.Exit(1)
 	}
