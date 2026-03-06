@@ -135,17 +135,22 @@ func (g *Gateway) callProvider(r *http.Request, bodyBytes []byte, providerName s
 		return nil, err
 	}
 
-	// refresh body for provider call
 	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	if g.log != nil {
+		g.log.Info("provider_call", map[string]any{
+			"request_id": server.RequestIDFromContext(r.Context()),
+			"provider":   providerName,
+			"path":       r.URL.Path,
+		})
+	}
 
 	resp, err := p.Do(r.Context(), r)
 	if err != nil {
 		return nil, err
 	}
 
-	// Optional: only fallback on 5xx (not on 4xx like auth/quota)
 	if resp.StatusCode >= 500 && g.fallback != "" && providerName != g.fallback {
-		// close body because we're not returning it
 		_ = resp.Body.Close()
 		return nil, fmt.Errorf("upstream_5xx status=%d provider=%s", resp.StatusCode, providerName)
 	}
@@ -235,10 +240,20 @@ func shortKey(key string) string {
 }
 
 func cloneHeader(h http.Header) map[string][]string {
-	out := make(map[string][]string, len(h))
+	out := make(map[string][]string)
+
 	for k, vv := range h {
-		out[k] = append([]string(nil), vv...)
+		switch http.CanonicalHeaderKey(k) {
+		case "Content-Type",
+			"Content-Length",
+			"Openai-Organization",
+			"Openai-Processing-Ms",
+			"Openai-Project",
+			"Openai-Version":
+			out[k] = append([]string(nil), vv...)
+		}
 	}
+
 	return out
 }
 
