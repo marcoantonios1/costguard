@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/marcoantonios1/costguard/internal/cache"
 	"github.com/marcoantonios1/costguard/internal/config"
 	"github.com/marcoantonios1/costguard/internal/gateway"
 	"github.com/marcoantonios1/costguard/internal/logging"
@@ -52,12 +53,19 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		ModelToProvider: cfg.Routing.ModelToProvider,
 	})
 
+	var c cache.Cache
+	if cfg.Cache.Enabled {
+		c = cache.NewMemory(cfg.Cache.MaxKeys)
+	}
+
 	gw, err := gateway.New(gateway.Deps{
 		Router:   rt,
 		Registry: reg,
 		Log:      log,
 
 		FallbackProvider: cfg.Routing.FallbackProvider,
+		Cache:            c,
+		CacheTTL:         cfg.Cache.TTL,
 	})
 	if err != nil {
 		log.Error("failed_to_create_gateway", map[string]any{"error": err})
