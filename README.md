@@ -1,206 +1,307 @@
 # Costguard
 
-Costguard is an OpenAI-compatible AI gateway built in Go.
+Costguard is an **OpenAI-compatible AI gateway written in Go**.
 
-It sits between your application and an LLM provider so you can add routing, caching, usage tracking, and later cost controls without changing your app code.
+It sits between your application and LLM providers and adds capabilities like:
 
-## Current status
-
-The project is in **Phase A**.
-
-What exists right now:
-- single-binary Go service
-- HTTP server with graceful shutdown
-- `GET /healthz` health endpoint
-- starter project structure for config, gateway, providers, router, cache, metering, and observability
-
-What does **not** exist yet:
-- `/v1/chat/completions`
-- provider forwarding
-- routing logic
+- smart provider routing
 - response caching
-- token / cost metering
+- usage and cost tracking
+- provider fallback
+- centralized logging
 
-That is intentional. The project is being built in clean phases.
+without requiring changes to your existing OpenAI client code.
 
-## Why Costguard?
+Your application continues using the **OpenAI API format**, while Costguard handles the control layer.
 
-LLM apps often have four problems:
-- they send too many requests to expensive models
-- they regenerate the same response repeatedly
-- they do not measure usage and cost clearly
-- they have no policy layer between the app and the model provider
+Think of Costguard as **a lightweight API gateway for LLM traffic**.
 
-Costguard is meant to solve that with a small gateway that is easy to run and easy to extend.
+---
 
-## High-level architecture
+# Why Costguard?
 
-```text
-Your App -> Costguard -> LLM Provider
+Most LLM applications eventually run into problems like:
+
+- sending too many requests to expensive models
+- regenerating identical responses repeatedly
+- lacking clear visibility into token usage and cost
+- having no policy layer between the app and the model provider
+
+Costguard solves these problems by introducing a **thin gateway layer** that manages requests before they reach the model provider.
+
+---
+
+# High-Level Architecture
+
+```
+Your App
+   │
+   ▼
+Costguard
+   │
+   ├── Router (model → provider)
+   ├── Cache (reuse identical responses)
+   ├── Metering (usage tracking)
+   ▼
+Provider Adapter
+   │
+   ▼
+LLM Provider API
 ```
 
-Phase A starts with OpenAI-compatible HTTP behavior first, then adds the optimization layers behind it.
+Your application talks to Costguard using **standard OpenAI API requests**.
 
-## Design goals
+---
 
-- **OpenAI-compatible** so existing apps can adopt it easily
-- **Single binary** for simple local development and deployment
-- **Incremental architecture** so Phase B can add more providers and policies cleanly
-- **Low operational overhead** for the first version
-- **Production-minded foundation** even while the MVP stays small
-
-## Project structure
-
-```text
-costguard/
-├── cmd/
-│   └── api/                  # application entrypoint
-├── internal/
-│   ├── cache/                # cache interfaces and implementations
-│   ├── config/               # config models and loading
-│   ├── gateway/              # OpenAI-compatible gateway handlers
-│   ├── metering/             # usage and cost estimation
-│   ├── observability/        # logging / request tracing
-│   ├── providers/            # provider abstractions and implementations
-│   ├── router/               # model/provider selection rules
-│   └── server/               # HTTP server and infrastructure handlers
-├── configs/                  # example config files
-├── scripts/                  # development scripts
-├── go.mod
-└── README.md
-```
-
-## What Commit 1 implements
-
-Commit 1 establishes the first runnable baseline.
-
-### Included
-- `cmd/api/main.go`
-- `internal/server/http.go`
-- `internal/server/health.go`
-
-### Behavior
-- starts an HTTP server
-- listens on `:8080` by default
-- reads `PORT` from the environment if provided
-- exposes `GET /healthz`
-- shuts down gracefully on `SIGINT` and `SIGTERM`
-
-## Run locally
-
-Requirements:
-- Go 1.22+
+# Quick Example
 
 Start the server:
 
 ```bash
-go run ./cmd/api
+go run ./cmd/api -config ./config.json
 ```
 
-Use a custom port:
+Send a request using the OpenAI API format:
 
 ```bash
-PORT=9090 go run ./cmd/api
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [
+      {"role":"user","content":"Say hello"}
+    ]
+  }'
+```
+
+Your application can simply change the API base URL:
+
+```
+OPENAI_BASE_URL=http://localhost:8080
+```
+
+No other changes are required.
+
+---
+
+# Current Status
+
+Costguard is currently in **Phase A (MVP)**.
+
+### Implemented
+
+- single-binary Go service
+- HTTP server with graceful shutdown
+- `GET /healthz` endpoint
+- OpenAI-compatible `/v1/chat/completions`
+- provider abstraction layer
+- OpenAI provider adapter
+- model → provider routing
+- fallback provider support
+- structured request logging
+- modular project architecture
+
+### In Progress
+
+- memory response cache
+- token usage tracking
+- cost estimation
+
+---
+
+# Project Structure
+
+```
+costguard/
+├── cmd/
+│   └── api/                     # application entrypoint
+│
+├── internal/
+│   ├── app/                     # application wiring
+│   ├── cache/                   # cache interfaces and implementations
+│   ├── config/                  # configuration loading
+│   ├── gateway/                 # request pipeline
+│   ├── logging/                 # structured logging
+│   ├── providers/               # provider abstractions
+│   │   └── openai/              # OpenAI provider client
+│   ├── router/                  # model → provider routing
+│   └── server/                  # HTTP infrastructure
+│       └── openai/              # OpenAI-compatible HTTP layer
+│
+├── configs/                     # example configuration files
+├── scripts/                     # development scripts
+├── go.mod
+└── README.md
+```
+
+---
+
+# Configuration
+
+Costguard uses a JSON configuration file.
+
+Example:
+
+```json
+{
+  "server": { "addr": ":8080" },
+
+  "logging": {
+    "level": "info",
+    "json": true
+  },
+
+  "cache": {
+    "enabled": true,
+    "ttl": "30s",
+    "max_keys": 10000
+  },
+
+  "routing": {
+    "default_provider": "openai_primary",
+    "fallback_provider": "openai_backup",
+    "model_to_provider": {
+      "gpt-4o-mini": "openai_primary"
+    }
+  },
+
+  "providers": {
+    "openai": {
+      "openai_primary": {
+        "base_url": "https://api.openai.com",
+        "api_key": "env:OPENAI_API_KEY",
+        "timeout": "60s"
+      }
+    }
+  }
+}
+```
+
+Environment variables can be referenced using:
+
+```
+env:VARIABLE_NAME
+```
+
+Example:
+
+```
+env:OPENAI_API_KEY
+```
+
+---
+
+# Design Goals
+
+Costguard follows a few core design principles.
+
+### OpenAI Compatibility
+
+Existing OpenAI clients should work without modification.
+
+### Single Binary
+
+The gateway runs as a single Go binary for simplicity and easy deployment.
+
+### Incremental Architecture
+
+The codebase is structured so additional providers, policies, and infrastructure can be added without refactoring the core.
+
+### Low Operational Overhead
+
+The first versions should be easy to run locally and deploy anywhere.
+
+---
+
+# Phase Roadmap
+
+## Phase A — Developer Gateway
+
+Goal: build the smallest useful OpenAI-compatible gateway.
+
+Features:
+
+- OpenAI-compatible API
+- provider abstraction
+- basic routing rules
+- in-memory response cache
+- usage tracking
+- structured logging
+
+---
+
+## Phase B — Multi-Provider Control Layer
+
+Planned additions:
+
+- multiple providers (OpenAI, Claude, Gemini)
+- advanced routing policies
+- Redis cache
+- budget guardrails
+- team / project quotas
+- improved observability
+
+---
+
+## Phase C — Managed Platform
+
+Possible future direction:
+
+- hosted control plane
+- analytics dashboard
+- tenant management
+- billing and usage controls
+
+---
+
+# Development
+
+Requirements:
+
+```
+Go 1.22+
+```
+
+Run locally:
+
+```bash
+go run ./cmd/api -config ./config.json
 ```
 
 Test the health endpoint:
 
 ```bash
-curl -i http://localhost:8080/healthz
+curl http://localhost:8080/healthz
 ```
 
 Expected response:
 
-```json
-{"status":"ok"}
+```
+ok
 ```
 
-## Phase plan
+---
 
-## Phase A — developer tool
+# Future Work
 
-Goal: build the smallest useful OpenAI-compatible gateway.
+Near-term improvements:
 
-Planned order:
-1. health endpoint and server bootstrap
-2. env-based config loader
-3. provider interface
-4. OpenAI provider passthrough
-5. `/v1/chat/completions`
-6. basic routing rules
-7. in-memory cache
-8. usage and cost metering
-9. request logging polish
+- response caching
+- token usage estimation
+- cost calculation
+- request tracing
+- improved error handling
 
-## Phase B — multi-provider + policy layer
+Long-term direction:
 
-Planned additions:
-- multiple providers such as OpenAI, Gemini, Claude, and others
-- provider/model routing rules
-- Redis cache
-- budget guardrails
-- project/team quotas
-- better auditability
+- provider marketplace
+- advanced routing policies
+- rate limiting
+- cost optimization strategies
 
-## Phase C — managed platform
+---
 
-Possible future direction:
-- hosted control plane
-- dashboard and analytics
-- tenant management
-- billing and usage controls
+# License
 
-## Roadmap notes
-
-A good rule for this repo:
-- build the smallest complete slice first
-- keep extension points, but do not overbuild them early
-- optimize for correctness and clarity before cleverness
-
-## Configuration
-
-Right now the running baseline only uses one environment variable:
-
-```bash
-PORT=8080
-```
-
-A dedicated config package already exists in the structure and will be wired in next.
-
-Planned early config values:
-- `PORT`
-- `OPENAI_API_KEY`
-- `OPENAI_BASE_URL`
-- `LOG_LEVEL`
-
-## Dockerfile — now or later?
-
-Create a **simple dev Dockerfile after Commit 2 or Commit 3**, not at the very end.
-
-That is the best timing because:
-- after Commit 1, the app is barely more than a health server
-- after Commit 2 or 3, the project has enough shape to containerize meaningfully
-- doing it too late increases the chance that local-only assumptions sneak into the code
-
-So the recommendation is:
-- **do not make Docker your next task**
-- finish config first
-- then add a small Dockerfile once the app can load config and start cleanly
-
-## Suggested next step
-
-The next implementation step should be:
-
-### Commit 2 — env-based config loader
-
-Add:
-- config structs
-- env loading
-- validation for required values later used by providers
-- wire config into `main.go`
-
-After that, move to the provider abstraction and OpenAI passthrough.
-
-## License
-
-This repository includes a `LICENSE` file at the project root.
+This project is licensed under the terms of the `LICENSE` file in the repository root.
