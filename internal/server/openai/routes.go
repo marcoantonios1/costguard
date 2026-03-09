@@ -18,7 +18,6 @@ func Register(mux *http.ServeMux, d Deps) {
 	h := &handler{gw: d.Gateway}
 
 	mux.HandleFunc("/v1/chat/completions", h.chatCompletions)
-	// Future:
-	// mux.HandleFunc("/v1/embeddings", h.embeddings)
-	// mux.HandleFunc("/v1/responses", h.responses)
+	mux.HandleFunc("/v1/embeddings", h.embeddings)
+	mux.HandleFunc("/v1/responses", h.responses)
 }
