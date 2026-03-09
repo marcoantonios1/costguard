@@ -41,7 +41,7 @@ Costguard
    │
    ├── Router (model → provider)
    ├── Cache (reuse identical responses)
-   ├── Metering (usage tracking)
+   ├── Metering (usage tracking & cost estimation)
    ▼
 Provider Adapter
    │
@@ -83,32 +83,6 @@ OPENAI_BASE_URL=http://localhost:8080
 
 No other changes are required.
 
----
-
-# Current Status
-
-Costguard is currently in **Phase A (MVP)**.
-
-### Implemented
-
-- single-binary Go service
-- HTTP server with graceful shutdown
-- `GET /healthz` endpoint
-- OpenAI-compatible `/v1/chat/completions`
-- provider abstraction layer
-- OpenAI provider adapter
-- model → provider routing
-- fallback provider support
-- structured request logging
-- modular project architecture
-
-### In Progress
-
-- memory response cache
-- token usage tracking
-- cost estimation
-
----
 
 # Project Structure
 
@@ -212,48 +186,6 @@ The codebase is structured so additional providers, policies, and infrastructure
 
 The first versions should be easy to run locally and deploy anywhere.
 
----
-
-# Phase Roadmap
-
-## Phase A — Developer Gateway
-
-Goal: build the smallest useful OpenAI-compatible gateway.
-
-Features:
-
-- OpenAI-compatible API
-- provider abstraction
-- basic routing rules
-- in-memory response cache
-- usage tracking
-- structured logging
-
----
-
-## Phase B — Multi-Provider Control Layer
-
-Planned additions:
-
-- multiple providers (OpenAI, Claude, Gemini)
-- advanced routing policies
-- Redis cache
-- budget guardrails
-- team / project quotas
-- improved observability
-
----
-
-## Phase C — Managed Platform
-
-Possible future direction:
-
-- hosted control plane
-- analytics dashboard
-- tenant management
-- billing and usage controls
-
----
 
 # Development
 
@@ -280,25 +212,6 @@ Expected response:
 ```
 ok
 ```
-
----
-
-# Future Work
-
-Near-term improvements:
-
-- response caching
-- token usage estimation
-- cost calculation
-- request tracing
-- improved error handling
-
-Long-term direction:
-
-- provider marketplace
-- advanced routing policies
-- rate limiting
-- cost optimization strategies
 
 ---
 
