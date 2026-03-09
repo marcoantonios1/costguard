@@ -12,6 +12,7 @@ import (
 
 	"github.com/marcoantonios1/costguard/internal/cache"
 	"github.com/marcoantonios1/costguard/internal/logging"
+	"github.com/marcoantonios1/costguard/internal/metering"
 	"github.com/marcoantonios1/costguard/internal/providers"
 	"github.com/marcoantonios1/costguard/internal/server"
 )
@@ -40,6 +41,15 @@ type Deps struct {
 	CacheTTL         time.Duration
 }
 
+type openAIUsageResponse struct {
+	Model string `json:"model"`
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage"`
+}
+
 func New(d Deps) (*Gateway, error) {
 	if d.Router == nil {
 		return nil, fmt.Errorf("router is nil")
@@ -47,6 +57,7 @@ func New(d Deps) (*Gateway, error) {
 	if d.Registry == nil {
 		return nil, fmt.Errorf("registry is nil")
 	}
+
 	return &Gateway{
 		router:   d.Router,
 		reg:      d.Registry,
@@ -79,6 +90,7 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 
 	cacheable := g.isCacheableRequest(r, bodyBytes)
 	cacheKey := ""
+
 	if cacheable && g.cache != nil && g.cacheTTL > 0 {
 		cacheKey = buildCacheKey(r, bodyBytes)
 
@@ -91,6 +103,8 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 					"model":      model,
 				})
 			}
+
+			g.meterResponse(r, providerName, model, entry.Body, true)
 			return responseFromCacheEntry(r, entry), nil
 		}
 
@@ -106,7 +120,7 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 
 	resp, err := g.callProvider(r, bodyBytes, providerName)
 	if err == nil {
-		return g.maybeStoreAndReturn(r, resp, cacheable, cacheKey)
+		return g.maybeStoreAndReturn(r, resp, providerName, model, cacheable, cacheKey)
 	}
 
 	shouldTryFallback := g.fallback != "" && g.fallback != providerName
@@ -119,11 +133,13 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 				"err":        err.Error(),
 			})
 		}
+
 		resp, err = g.callProvider(r, bodyBytes, g.fallback)
 		if err != nil {
 			return nil, err
 		}
-		return g.maybeStoreAndReturn(r, resp, cacheable, cacheKey)
+
+		return g.maybeStoreAndReturn(r, resp, g.fallback, model, cacheable, cacheKey)
 	}
 
 	return nil, err
@@ -168,16 +184,18 @@ func extractModel(body []byte) string {
 	return v.Model
 }
 
-func (g *Gateway) maybeStoreAndReturn(r *http.Request, resp *http.Response, cacheable bool, cacheKey string) (*http.Response, error) {
-	if !cacheable || g.cache == nil || g.cacheTTL <= 0 {
-		return resp, nil
-	}
-
+func (g *Gateway) maybeStoreAndReturn(
+	r *http.Request,
+	resp *http.Response,
+	providerName, model string,
+	cacheable bool,
+	cacheKey string,
+) (*http.Response, error) {
 	if resp == nil || resp.Body == nil {
 		return resp, nil
 	}
 
-	// Only cache successful responses for Phase A
+	// For Phase A, only meter/cache successful responses.
 	if resp.StatusCode != http.StatusOK {
 		return resp, nil
 	}
@@ -187,6 +205,20 @@ func (g *Gateway) maybeStoreAndReturn(r *http.Request, resp *http.Response, cach
 		return nil, err
 	}
 	_ = resp.Body.Close()
+
+	// Meter all successful provider responses, even when caching is disabled.
+	g.meterResponse(r, providerName, model, body, false)
+
+	// If not cacheable, or cache disabled, just rebuild the response and return it.
+	if !cacheable || g.cache == nil || g.cacheTTL <= 0 {
+		return &http.Response{
+			StatusCode: resp.StatusCode,
+			Status:     fmt.Sprintf("%d %s", resp.StatusCode, http.StatusText(resp.StatusCode)),
+			Header:     resp.Header.Clone(),
+			Body:       io.NopCloser(bytes.NewReader(body)),
+			Request:    r,
+		}, nil
+	}
 
 	entry := cache.Entry{
 		StatusCode: resp.StatusCode,
@@ -270,4 +302,80 @@ func responseFromCacheEntry(r *http.Request, entry cache.Entry) *http.Response {
 		Body:       io.NopCloser(bytes.NewReader(entry.Body)),
 		Request:    r,
 	}
+}
+
+func (g *Gateway) meterResponse(r *http.Request, providerName string, model string, body []byte, cacheHit bool) {
+	if g.log == nil {
+		return
+	}
+
+	if cacheHit {
+		usage := metering.Usage{
+			Provider:         providerName,
+			Model:            model,
+			PromptTokens:     0,
+			CompletionTokens: 0,
+			TotalTokens:      0,
+			CacheHit:         true,
+		}
+
+		cost, _ := metering.EstimateCost(usage)
+
+		g.log.Info("request_metered", map[string]any{
+			"request_id":         server.RequestIDFromContext(r.Context()),
+			"provider":           providerName,
+			"model":              model,
+			"prompt_tokens":      0,
+			"completion_tokens":  0,
+			"total_tokens":       0,
+			"estimated_cost_usd": cost,
+			"cache_hit":          true,
+		})
+		return
+	}
+
+	var resp openAIUsageResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		g.log.Error("metering_parse_failed", map[string]any{
+			"request_id": server.RequestIDFromContext(r.Context()),
+			"provider":   providerName,
+			"error":      err.Error(),
+		})
+		return
+	}
+
+	finalModel := resp.Model
+	if finalModel == "" {
+		finalModel = model
+	}
+
+	usage := metering.Usage{
+		Provider:         providerName,
+		Model:            finalModel,
+		PromptTokens:     resp.Usage.PromptTokens,
+		CompletionTokens: resp.Usage.CompletionTokens,
+		TotalTokens:      resp.Usage.TotalTokens,
+		CacheHit:         false,
+	}
+
+	cost, ok := metering.EstimateCost(usage)
+
+	fields := map[string]any{
+		"request_id":        server.RequestIDFromContext(r.Context()),
+		"provider":          providerName,
+		"model":             finalModel,
+		"prompt_tokens":     usage.PromptTokens,
+		"completion_tokens": usage.CompletionTokens,
+		"total_tokens":      usage.TotalTokens,
+		"cache_hit":         false,
+	}
+
+	if ok {
+		fields["estimated_cost_usd"] = cost
+	} else {
+		fields["estimated_cost_usd"] = 0
+		fields["price_found"] = false
+	}
+
+	g.log.Info("request_metered", fields)
 }
