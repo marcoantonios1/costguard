@@ -83,6 +83,25 @@ OPENAI_BASE_URL=http://localhost:8080
 
 No other changes are required.
 
+---
+
+# Run with Docker
+
+Build the image:
+
+```bash
+docker build -t costguard .
+```
+
+Run the container:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e OPENAI_API_KEY="$OPENAI_API_KEY" \
+  -v "$(pwd)/config.json:/config.json" \
+  costguard
+```
+
 
 # Project Structure
 
