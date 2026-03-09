@@ -10,7 +10,9 @@ func EstimateCost(u Usage) (float64, bool) {
 		return 0, false
 	}
 
-	price, ok := providerPrices[u.Model]
+	normalized := NormalizeModel(u.Provider, u.Model)
+
+	price, ok := providerPrices[normalized]
 	if !ok {
 		return 0, false
 	}
