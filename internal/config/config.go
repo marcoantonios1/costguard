@@ -75,10 +75,11 @@ func Load(path string) (Config, error) {
 		Timeout string `json:"timeout"`
 	}
 	type rawConfig struct {
-		Server    ServerConfig  `json:"server"`
-		Logging   LoggingConfig `json:"logging"`
-		Cache     rawCache      `json:"cache"`
-		Routing   RoutingConfig `json:"routing"`
+		Server    ServerConfig   `json:"server"`
+		Logging   LoggingConfig  `json:"logging"`
+		Cache     rawCache       `json:"cache"`
+		Database  DatabaseConfig `json:"database"`
+		Routing   RoutingConfig  `json:"routing"`
 		Providers struct {
 			OpenAI map[string]rawOpenAIProvider `json:"openai"`
 		} `json:"providers"`
@@ -95,6 +96,8 @@ func Load(path string) (Config, error) {
 
 	c.Cache.Enabled = rc.Cache.Enabled
 	c.Cache.MaxKeys = rc.Cache.MaxKeys
+	c.Database = rc.Database
+	c.Database.DSN = rc.Database.DSN
 	if rc.Cache.TTL != "" {
 		d, err := time.ParseDuration(rc.Cache.TTL)
 		if err != nil {

@@ -4,7 +4,7 @@
   "cache": { "enabled": true, "ttl": "30s", "max_keys": 10000 },
   "database": {
     "driver": "postgres",
-    "dsn": "env:COSTGUARD_DATABASE_URL"
+    "dsn": "postgres://costguard:costguard@localhost:5432/costguard?sslmode=disable"
   },
   "routing": {
     "default_provider": "openai_primary",

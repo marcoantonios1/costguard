@@ -11,6 +11,7 @@ import (
 
 	"github.com/marcoantonios1/costguard/internal/cache"
 	"github.com/marcoantonios1/costguard/internal/config"
+	"github.com/marcoantonios1/costguard/internal/database"
 	"github.com/marcoantonios1/costguard/internal/gateway"
 	"github.com/marcoantonios1/costguard/internal/logging"
 	"github.com/marcoantonios1/costguard/internal/providers"
@@ -18,6 +19,7 @@ import (
 	"github.com/marcoantonios1/costguard/internal/router"
 	"github.com/marcoantonios1/costguard/internal/server"
 	openai_http "github.com/marcoantonios1/costguard/internal/server/openai"
+	"github.com/marcoantonios1/costguard/internal/usage"
 )
 
 type App struct {
@@ -58,6 +60,14 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		c = cache.NewMemory(cfg.Cache.MaxKeys)
 	}
 
+	ctx := context.Background()
+	pool, err := database.NewPostgresPool(ctx, cfg.Database.DSN)
+	if err != nil {
+		return nil, err
+	}
+
+	usageStore := usage.NewPostgresStore(pool)
+
 	gw, err := gateway.New(gateway.Deps{
 		Router:   rt,
 		Registry: reg,
@@ -66,6 +76,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		FallbackProvider: cfg.Routing.FallbackProvider,
 		Cache:            c,
 		CacheTTL:         cfg.Cache.TTL,
+		UsageStore:       usageStore,
 	})
 	if err != nil {
 		log.Error("failed_to_create_gateway", map[string]any{"error": err})
