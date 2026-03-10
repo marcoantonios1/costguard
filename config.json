@@ -2,6 +2,10 @@
   "server": { "addr": ":8080" },
   "logging": { "level": "info", "json": true },
   "cache": { "enabled": true, "ttl": "30s", "max_keys": 10000 },
+  "database": {
+    "driver": "postgres",
+    "dsn": "postgres://costguard:costguard@localhost:5432/costguard?sslmode=disable"
+  },
   "routing": {
     "default_provider": "openai_primary",
     "fallback_provider": "openai_backup",

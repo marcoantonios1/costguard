@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/marcoantonios1/costguard/internal/metering"
 	"github.com/marcoantonios1/costguard/internal/providers"
 	"github.com/marcoantonios1/costguard/internal/server"
+	"github.com/marcoantonios1/costguard/internal/usage"
 )
 
 type Router interface {
@@ -26,9 +28,10 @@ type Gateway struct {
 	reg    *providers.Registry
 	log    *logging.Log
 
-	fallback string
-	cache    cache.Cache
-	cacheTTL time.Duration
+	fallback   string
+	cache      cache.Cache
+	cacheTTL   time.Duration
+	usageStore usage.Store
 }
 
 type Deps struct {
@@ -39,6 +42,7 @@ type Deps struct {
 	FallbackProvider string
 	Cache            cache.Cache
 	CacheTTL         time.Duration
+	UsageStore       usage.Store
 }
 
 type openAIUsageResponse struct {
@@ -52,19 +56,20 @@ type openAIUsageResponse struct {
 
 func New(d Deps) (*Gateway, error) {
 	if d.Router == nil {
-		return nil, fmt.Errorf("router is nil")
+		return nil, errors.New("router is required")
 	}
 	if d.Registry == nil {
-		return nil, fmt.Errorf("registry is nil")
+		return nil, errors.New("registry is required")
 	}
 
 	return &Gateway{
-		router:   d.Router,
-		reg:      d.Registry,
-		log:      d.Log,
-		fallback: d.FallbackProvider,
-		cache:    d.Cache,
-		cacheTTL: d.CacheTTL,
+		router:     d.Router,
+		reg:        d.Registry,
+		log:        d.Log,
+		fallback:   d.FallbackProvider,
+		cache:      d.Cache,
+		cacheTTL:   d.CacheTTL,
+		usageStore: d.UsageStore,
 	}, nil
 }
 
@@ -104,7 +109,7 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 				})
 			}
 
-			g.meterResponse(r, providerName, model, entry.Body, true)
+			g.meterResponse(r, providerName, model, entry.Body, true, http.StatusOK)
 			return responseFromCacheEntry(r, entry), nil
 		}
 
@@ -207,7 +212,7 @@ func (g *Gateway) maybeStoreAndReturn(
 	_ = resp.Body.Close()
 
 	// Meter all successful provider responses, even when caching is disabled.
-	g.meterResponse(r, providerName, model, body, false)
+	g.meterResponse(r, providerName, model, body, false, resp.StatusCode)
 
 	// If not cacheable, or cache disabled, just rebuild the response and return it.
 	if !cacheable || g.cache == nil || g.cacheTTL <= 0 {
@@ -304,13 +309,21 @@ func responseFromCacheEntry(r *http.Request, entry cache.Entry) *http.Response {
 	}
 }
 
-func (g *Gateway) meterResponse(r *http.Request, providerName string, model string, body []byte, cacheHit bool) {
-	if g.log == nil {
-		return
-	}
+func (g *Gateway) meterResponse(
+	r *http.Request,
+	providerName string,
+	model string,
+	body []byte,
+	cacheHit bool,
+	statusCode int,
+) {
+	requestID := server.RequestIDFromContext(r.Context())
+	team := r.Header.Get("X-Costguard-Team")
+	project := r.Header.Get("X-Costguard-Project")
+	user := r.Header.Get("X-Costguard-User")
 
 	if cacheHit {
-		usage := metering.Usage{
+		usageData := metering.Usage{
 			Provider:         providerName,
 			Model:            model,
 			PromptTokens:     0,
@@ -319,10 +332,10 @@ func (g *Gateway) meterResponse(r *http.Request, providerName string, model stri
 			CacheHit:         true,
 		}
 
-		cost, _ := metering.EstimateCost(usage)
+		cost, priceFound := metering.EstimateCost(usageData)
 
-		g.log.Info("request_metered", map[string]any{
-			"request_id":         server.RequestIDFromContext(r.Context()),
+		fields := map[string]any{
+			"request_id":         requestID,
 			"provider":           providerName,
 			"model":              model,
 			"prompt_tokens":      0,
@@ -330,17 +343,54 @@ func (g *Gateway) meterResponse(r *http.Request, providerName string, model stri
 			"total_tokens":       0,
 			"estimated_cost_usd": cost,
 			"cache_hit":          true,
-		})
+		}
+		if !priceFound {
+			fields["price_found"] = false
+		}
+
+		if g.log != nil {
+			g.log.Info("request_metered", fields)
+		}
+
+		if g.usageStore != nil {
+			record := usage.Record{
+				RequestID:        requestID,
+				Timestamp:        time.Now().UTC(),
+				Provider:         providerName,
+				Model:            model,
+				PromptTokens:     0,
+				CompletionTokens: 0,
+				TotalTokens:      0,
+				EstimatedCostUSD: cost,
+				PriceFound:       priceFound,
+				CacheHit:         true,
+				Team:             team,
+				Project:          project,
+				User:             user,
+				Path:             r.URL.Path,
+				StatusCode:       statusCode,
+			}
+
+			if err := g.usageStore.Save(r.Context(), record); err != nil && g.log != nil {
+				g.log.Error("usage_save_failed", map[string]any{
+					"request_id": requestID,
+					"error":      err.Error(),
+				})
+			}
+		}
+
 		return
 	}
 
 	var resp openAIUsageResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
-		g.log.Error("metering_parse_failed", map[string]any{
-			"request_id": server.RequestIDFromContext(r.Context()),
-			"provider":   providerName,
-			"error":      err.Error(),
-		})
+		if g.log != nil {
+			g.log.Error("metering_parse_failed", map[string]any{
+				"request_id": requestID,
+				"provider":   providerName,
+				"error":      err.Error(),
+			})
+		}
 		return
 	}
 
@@ -349,7 +399,7 @@ func (g *Gateway) meterResponse(r *http.Request, providerName string, model stri
 		finalModel = model
 	}
 
-	usage := metering.Usage{
+	usageData := metering.Usage{
 		Provider:         providerName,
 		Model:            finalModel,
 		PromptTokens:     resp.Usage.PromptTokens,
@@ -358,24 +408,53 @@ func (g *Gateway) meterResponse(r *http.Request, providerName string, model stri
 		CacheHit:         false,
 	}
 
-	cost, ok := metering.EstimateCost(usage)
+	cost, priceFound := metering.EstimateCost(usageData)
 
 	fields := map[string]any{
-		"request_id":        server.RequestIDFromContext(r.Context()),
+		"request_id":        requestID,
 		"provider":          providerName,
 		"model":             finalModel,
-		"prompt_tokens":     usage.PromptTokens,
-		"completion_tokens": usage.CompletionTokens,
-		"total_tokens":      usage.TotalTokens,
+		"prompt_tokens":     usageData.PromptTokens,
+		"completion_tokens": usageData.CompletionTokens,
+		"total_tokens":      usageData.TotalTokens,
 		"cache_hit":         false,
 	}
 
-	if ok {
+	if priceFound {
 		fields["estimated_cost_usd"] = cost
 	} else {
 		fields["estimated_cost_usd"] = 0
 		fields["price_found"] = false
 	}
 
-	g.log.Info("request_metered", fields)
+	if g.log != nil {
+		g.log.Info("request_metered", fields)
+	}
+
+	if g.usageStore != nil {
+		record := usage.Record{
+			RequestID:        requestID,
+			Timestamp:        time.Now().UTC(),
+			Provider:         providerName,
+			Model:            finalModel,
+			PromptTokens:     usageData.PromptTokens,
+			CompletionTokens: usageData.CompletionTokens,
+			TotalTokens:      usageData.TotalTokens,
+			EstimatedCostUSD: cost,
+			PriceFound:       priceFound,
+			CacheHit:         false,
+			Team:             team,
+			Project:          project,
+			User:             user,
+			Path:             r.URL.Path,
+			StatusCode:       statusCode,
+		}
+
+		if err := g.usageStore.Save(r.Context(), record); err != nil && g.log != nil {
+			g.log.Error("usage_save_failed", map[string]any{
+				"request_id": requestID,
+				"error":      err.Error(),
+			})
+		}
+	}
 }
