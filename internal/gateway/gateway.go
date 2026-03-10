@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/marcoantonios1/costguard/internal/metering"
 	"github.com/marcoantonios1/costguard/internal/providers"
 	"github.com/marcoantonios1/costguard/internal/server"
+	"github.com/marcoantonios1/costguard/internal/usage"
 )
 
 type Router interface {
@@ -26,9 +28,10 @@ type Gateway struct {
 	reg    *providers.Registry
 	log    *logging.Log
 
-	fallback string
-	cache    cache.Cache
-	cacheTTL time.Duration
+	fallback   string
+	cache      cache.Cache
+	cacheTTL   time.Duration
+	usageStore usage.Store
 }
 
 type Deps struct {
@@ -39,6 +42,7 @@ type Deps struct {
 	FallbackProvider string
 	Cache            cache.Cache
 	CacheTTL         time.Duration
+	UsageStore       usage.Store
 }
 
 type openAIUsageResponse struct {
@@ -52,19 +56,20 @@ type openAIUsageResponse struct {
 
 func New(d Deps) (*Gateway, error) {
 	if d.Router == nil {
-		return nil, fmt.Errorf("router is nil")
+		return nil, errors.New("router is required")
 	}
 	if d.Registry == nil {
-		return nil, fmt.Errorf("registry is nil")
+		return nil, errors.New("registry is required")
 	}
 
 	return &Gateway{
-		router:   d.Router,
-		reg:      d.Registry,
-		log:      d.Log,
-		fallback: d.FallbackProvider,
-		cache:    d.Cache,
-		cacheTTL: d.CacheTTL,
+		router:     d.Router,
+		reg:        d.Registry,
+		log:        d.Log,
+		fallback:   d.FallbackProvider,
+		cache:      d.Cache,
+		cacheTTL:   d.CacheTTL,
+		usageStore: d.UsageStore,
 	}, nil
 }
 

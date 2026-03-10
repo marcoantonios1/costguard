@@ -11,8 +11,14 @@ type Config struct {
 	Server    ServerConfig    `json:"server"`
 	Logging   LoggingConfig   `json:"logging"`
 	Cache     CacheConfig     `json:"cache"`
+	Database  DatabaseConfig  `json:"database"`
 	Routing   RoutingConfig   `json:"routing"`
 	Providers ProvidersConfig `json:"providers"`
+}
+
+type DatabaseConfig struct {
+	Driver string `json:"driver"`
+	DSN    string `json:"dsn"`
 }
 
 type ServerConfig struct {
