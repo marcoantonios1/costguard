@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -54,6 +55,52 @@ func (s *PostgresStore) Save(ctx context.Context, r Record) error {
 	)
 
 	return err
+}
+
+func (s *PostgresStore) GetTotalSpend(ctx context.Context, from, to time.Time) (float64, error) {
+	var total float64
+
+	err := s.db.QueryRow(ctx, `
+		SELECT COALESCE(SUM(estimated_cost_usd), 0)
+		FROM usage_records
+		WHERE timestamp_utc >= $1
+		  AND timestamp_utc < $2
+	`, from, to).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+
+	return total, nil
+}
+
+func (s *PostgresStore) GetSpendByTeam(ctx context.Context, from, to time.Time) ([]TeamSpend, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT COALESCE(team, ''), COALESCE(SUM(estimated_cost_usd), 0)
+		FROM usage_records
+		WHERE timestamp_utc >= $1
+		  AND timestamp_utc < $2
+		GROUP BY team
+		ORDER BY SUM(estimated_cost_usd) DESC
+	`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []TeamSpend
+	for rows.Next() {
+		var item TeamSpend
+		if err := rows.Scan(&item.Team, &item.Spend); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func nullIfEmpty(v string) any {
