@@ -8,7 +8,7 @@
   },
   "budget": {
     "enabled": true,
-    "monthly_usd": 0.00000001
+    "monthly_usd": 0.0000001
   },
   "routing": {
     "default_provider": "openai_primary",
