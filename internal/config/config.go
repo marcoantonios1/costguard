@@ -12,6 +12,7 @@ type Config struct {
 	Logging   LoggingConfig   `json:"logging"`
 	Cache     CacheConfig     `json:"cache"`
 	Database  DatabaseConfig  `json:"database"`
+	Budget    BudgetConfig    `json:"budget"`
 	Routing   RoutingConfig   `json:"routing"`
 	Providers ProvidersConfig `json:"providers"`
 }
@@ -44,6 +45,11 @@ type RoutingConfig struct {
 
 type ProvidersConfig struct {
 	OpenAI map[string]OpenAIProvider `json:"openai"` // named instances
+}
+
+type BudgetConfig struct {
+	Enabled    bool    `json:"enabled"`
+	MonthlyUSD float64 `json:"monthly_usd"`
 }
 
 type OpenAIProvider struct {
@@ -79,6 +85,7 @@ func Load(path string) (Config, error) {
 		Logging   LoggingConfig  `json:"logging"`
 		Cache     rawCache       `json:"cache"`
 		Database  DatabaseConfig `json:"database"`
+		Budget    BudgetConfig   `json:"budget"`
 		Routing   RoutingConfig  `json:"routing"`
 		Providers struct {
 			OpenAI map[string]rawOpenAIProvider `json:"openai"`
@@ -98,6 +105,7 @@ func Load(path string) (Config, error) {
 	c.Cache.MaxKeys = rc.Cache.MaxKeys
 	c.Database = rc.Database
 	c.Database.DSN = rc.Database.DSN
+	c.Budget = rc.Budget
 	if rc.Cache.TTL != "" {
 		d, err := time.ParseDuration(rc.Cache.TTL)
 		if err != nil {

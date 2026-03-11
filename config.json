@@ -6,6 +6,10 @@
     "driver": "postgres",
     "dsn": "postgres://costguard:costguard@localhost:5432/costguard?sslmode=disable"
   },
+  "budget": {
+    "enabled": true,
+    "monthly_usd": 10
+  },
   "routing": {
     "default_provider": "openai_primary",
     "fallback_provider": "openai_backup",
