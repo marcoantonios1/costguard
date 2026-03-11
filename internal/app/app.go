@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/marcoantonios1/costguard/internal/budget"
 	"github.com/marcoantonios1/costguard/internal/cache"
 	"github.com/marcoantonios1/costguard/internal/config"
 	"github.com/marcoantonios1/costguard/internal/database"
@@ -68,6 +69,11 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 
 	usageStore := usage.NewPostgresStore(pool)
 
+	budgetSvc := budget.NewService(usageStore, budget.Config{
+		Enabled:    cfg.Budget.Enabled,
+		MonthlyUSD: cfg.Budget.MonthlyUSD,
+	})
+
 	gw, err := gateway.New(gateway.Deps{
 		Router:   rt,
 		Registry: reg,
@@ -77,6 +83,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		Cache:            c,
 		CacheTTL:         cfg.Cache.TTL,
 		UsageStore:       usageStore,
+		BudgetChecker:    budgetSvc,
 	})
 	if err != nil {
 		log.Error("failed_to_create_gateway", map[string]any{"error": err})

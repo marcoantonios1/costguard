@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/marcoantonios1/costguard/internal/budget"
 	"github.com/marcoantonios1/costguard/internal/cache"
 	"github.com/marcoantonios1/costguard/internal/logging"
 	"github.com/marcoantonios1/costguard/internal/metering"
@@ -19,6 +20,21 @@ import (
 	"github.com/marcoantonios1/costguard/internal/server"
 	"github.com/marcoantonios1/costguard/internal/usage"
 )
+
+func newJSONErrorResponse(r *http.Request, status int, message string) *http.Response {
+	body := fmt.Sprintf(`{"error":{"message":"%s"}}`, message)
+
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	return &http.Response{
+		StatusCode: status,
+		Status:     fmt.Sprintf("%d %s", status, http.StatusText(status)),
+		Header:     header,
+		Body:       io.NopCloser(bytes.NewReader([]byte(body))),
+		Request:    r,
+	}
+}
 
 type Router interface {
 	PickProvider(model string) string
@@ -127,6 +143,26 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 				"path":       r.URL.Path,
 				"model":      model,
 			})
+		}
+	}
+
+	if g.budgetChecker != nil {
+		if err := g.budgetChecker.CheckMonthlyBudget(r.Context(), time.Now()); err != nil {
+			if errors.Is(err, budget.ErrMonthlyBudgetExceeded) {
+				if g.log != nil {
+					g.log.Error("monthly_budget_exceeded", map[string]any{
+						"request_id": server.RequestIDFromContext(r.Context()),
+					})
+				}
+
+				return newJSONErrorResponse(
+					r,
+					http.StatusPaymentRequired,
+					"monthly budget exceeded",
+				), nil
+			}
+
+			return nil, err
 		}
 	}
 
