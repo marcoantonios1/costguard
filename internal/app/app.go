@@ -18,6 +18,7 @@ import (
 	openai_provider "github.com/marcoantonios1/costguard/internal/providers/openai"
 	"github.com/marcoantonios1/costguard/internal/router"
 	"github.com/marcoantonios1/costguard/internal/server"
+	"github.com/marcoantonios1/costguard/internal/server/admin"
 	openai_http "github.com/marcoantonios1/costguard/internal/server/openai"
 	"github.com/marcoantonios1/costguard/internal/usage"
 )
@@ -88,6 +89,10 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 	mux.HandleFunc("/healthz", server.HealthzHandler())
 
 	openai_http.Register(mux, openai_http.Deps{Gateway: gw})
+
+	admin.Register(mux, admin.Deps{
+		UsageStore: usageStore,
+	})
 
 	// wrap middleware
 	handler := server.LoggingMiddleware(log, mux)

@@ -39,3 +39,9 @@ type ProviderSpend struct {
 	Provider string  `json:"provider"`
 	Spend    float64 `json:"spend_usd"`
 }
+
+type Summary struct {
+	From          time.Time `json:"from"`
+	To            time.Time `json:"to"`
+	TotalSpendUSD float64   `json:"total_spend_usd"`
+}
