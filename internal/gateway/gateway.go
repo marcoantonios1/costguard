@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -23,15 +24,20 @@ type Router interface {
 	PickProvider(model string) string
 }
 
+type BudgetChecker interface {
+	CheckMonthlyBudget(ctx context.Context, now time.Time) error
+}
+
 type Gateway struct {
 	router Router
 	reg    *providers.Registry
 	log    *logging.Log
 
-	fallback   string
-	cache      cache.Cache
-	cacheTTL   time.Duration
-	usageStore usage.Store
+	fallback      string
+	cache         cache.Cache
+	cacheTTL      time.Duration
+	usageStore    usage.Store
+	budgetChecker BudgetChecker
 }
 
 type Deps struct {
@@ -43,6 +49,7 @@ type Deps struct {
 	Cache            cache.Cache
 	CacheTTL         time.Duration
 	UsageStore       usage.Store
+	BudgetChecker    BudgetChecker
 }
 
 type openAIUsageResponse struct {
