@@ -32,6 +32,13 @@ func (l *Log) Info(msg string, fields map[string]any) {
 	l.write("info", msg, fields)
 }
 
+func (l *Log) Warn(msg string, fields map[string]any) {
+	if !l.shouldLog("warn") {
+		return
+	}
+	l.write("warn", msg, fields)
+}
+
 func (l *Log) Error(msg string, fields map[string]any) {
 	if !l.shouldLog("error") {
 		return
@@ -50,7 +57,8 @@ func (l *Log) shouldLog(level string) bool {
 	order := map[string]int{
 		"debug": 0,
 		"info":  1,
-		"error": 2,
+		"warn":  2,
+		"error": 3,
 	}
 
 	current, ok := order[l.level]
@@ -105,6 +113,8 @@ func levelColor(level string) string {
 		return blue()
 	case "info":
 		return green()
+	case "warn":
+		return yellow()
 	case "error":
 		return red()
 	default:
@@ -116,6 +126,7 @@ func reset() string { return "\033[0m" }
 func red() string   { return "\033[31m" }
 func green() string { return "\033[32m" }
 func blue() string  { return "\033[34m" }
+func yellow() string { return "\033[33m" }
 func white() string { return "\033[37m" }
 func dim(s string) string {
 	return "\033[2m" + s + "\033[0m"

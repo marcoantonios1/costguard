@@ -148,24 +148,36 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 	}
 
 	if g.budgetChecker != nil {
-		if err := g.budgetChecker.CheckMonthlyBudget(r.Context(), time.Now()); err != nil {
-			if errors.Is(err, budget.ErrMonthlyBudgetExceeded) {
-				if g.log != nil {
-					g.log.Error("monthly_budget_exceeded", map[string]any{
-						"request_id": server.RequestIDFromContext(r.Context()),
-					})
-				}
-
-				return newJSONErrorResponse(
-					r,
-					http.StatusPaymentRequired,
-					"monthly budget exceeded",
-				), nil
+	if err := g.budgetChecker.CheckMonthlyBudget(r.Context(), time.Now()); err != nil {
+		if errors.Is(err, budget.ErrMonthlyBudgetExceeded) {
+			if g.log != nil {
+				g.log.Error("monthly_budget_exceeded", map[string]any{
+					"request_id": server.RequestIDFromContext(r.Context()),
+				})
 			}
 
+			return newJSONErrorResponse(
+				r,
+				http.StatusPaymentRequired,
+				"monthly budget exceeded",
+			), nil
+		} else if errors.Is(err, budget.ErrMonthlyBudgetReachedNinetyPercent) {
+			if g.log != nil {
+				g.log.Warn("monthly_budget_reached_90_percent", map[string]any{
+					"request_id": server.RequestIDFromContext(r.Context()),
+				})
+			}
+		} else if errors.Is(err, budget.ErrMonthlyBudgetReachedEightyPercent) {
+			if g.log != nil {
+				g.log.Warn("monthly_budget_reached_80_percent", map[string]any{
+					"request_id": server.RequestIDFromContext(r.Context()),
+				})
+			}
+		} else {
 			return nil, err
 		}
 	}
+}
 
 	resp, err := g.callProvider(r, bodyBytes, providerName)
 	if err == nil {

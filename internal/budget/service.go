@@ -7,6 +7,8 @@ import (
 )
 
 var ErrMonthlyBudgetExceeded = errors.New("monthly budget exceeded")
+var ErrMonthlyBudgetReachedEightyPercent = errors.New("monthly budget reached 80%")
+var ErrMonthlyBudgetReachedNinetyPercent = errors.New("monthly budget reached 90%")
 
 type UsageReader interface {
 	GetTotalSpend(ctx context.Context, from, to time.Time) (float64, error)
@@ -44,6 +46,12 @@ func (s *Service) CheckMonthlyBudget(ctx context.Context, now time.Time) error {
 
 	if total >= s.cfg.MonthlyUSD {
 		return ErrMonthlyBudgetExceeded
+	}
+	if total >= s.cfg.MonthlyUSD*0.9 {
+		return ErrMonthlyBudgetReachedNinetyPercent
+	}
+	if total >= s.cfg.MonthlyUSD*0.8 {
+		return ErrMonthlyBudgetReachedEightyPercent
 	}
 
 	return nil
