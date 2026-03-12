@@ -16,6 +16,7 @@ import (
 	"github.com/marcoantonios1/costguard/internal/cache"
 	"github.com/marcoantonios1/costguard/internal/logging"
 	"github.com/marcoantonios1/costguard/internal/metering"
+	"github.com/marcoantonios1/costguard/internal/notify"
 	"github.com/marcoantonios1/costguard/internal/providers"
 	"github.com/marcoantonios1/costguard/internal/server"
 	"github.com/marcoantonios1/costguard/internal/usage"
@@ -49,6 +50,10 @@ type AlertStore interface {
 	MarkSent(ctx context.Context, periodStart time.Time, thresholdPercent int, alertType string) error
 }
 
+type Notifier interface {
+	Send(ctx context.Context, msg notify.Message) error
+}
+
 type Gateway struct {
 	router Router
 	reg    *providers.Registry
@@ -60,6 +65,7 @@ type Gateway struct {
 	usageStore    usage.Store
 	budgetChecker BudgetChecker
 	alertStore    AlertStore
+	notifier      Notifier
 }
 
 type Deps struct {
@@ -73,6 +79,7 @@ type Deps struct {
 	UsageStore       usage.Store
 	BudgetChecker    BudgetChecker
 	AlertStore       AlertStore
+	Notifier         Notifier
 }
 
 type openAIUsageResponse struct {
@@ -102,6 +109,7 @@ func New(d Deps) (*Gateway, error) {
 		usageStore:    d.UsageStore,
 		budgetChecker: d.BudgetChecker,
 		alertStore:    d.AlertStore,
+		notifier:      d.Notifier,
 	}, nil
 }
 
@@ -583,10 +591,56 @@ func (g *Gateway) emitMonthlyBudgetAlertOnce(
 		}
 	}
 
-	if err := g.alertStore.MarkSent(ctx, periodStart, thresholdPercent, alertType); err != nil && g.log != nil {
-		g.log.Error("budget_alert_mark_sent_failed", map[string]any{
+	emailSent := true
+	if g.notifier != nil {
+		if err := g.sendBudgetAlertEmail(ctx, thresholdPercent, periodStart); err != nil {
+			emailSent = false
+		}
+	}
+
+	if emailSent {
+		if err := g.alertStore.MarkSent(ctx, periodStart, thresholdPercent, alertType); err != nil && g.log != nil {
+			g.log.Error("budget_alert_mark_sent_failed", map[string]any{
+				"threshold_percent": thresholdPercent,
+				"error":             err.Error(),
+			})
+		}
+	}
+}
+
+func (g *Gateway) sendBudgetAlertEmail(ctx context.Context, thresholdPercent int, periodStart time.Time) error {
+	if g.notifier == nil {
+		return fmt.Errorf("notifier not configured")
+	}
+
+	subject := fmt.Sprintf("[Costguard] Monthly budget reached %d%%", thresholdPercent)
+	if thresholdPercent == 100 {
+		subject = "[Costguard] Monthly budget exceeded"
+	}
+
+	body := fmt.Sprintf(
+		"Costguard budget alert\n\nThreshold: %d%%\nPeriod start: %s\n",
+		thresholdPercent,
+		periodStart.Format("2006-01-02"),
+	)
+
+	err := g.notifier.Send(ctx, notify.Message{
+		Subject: subject,
+		Text:    body,
+	})
+	if err != nil && g.log != nil {
+		g.log.Error("budget_alert_email_failed", map[string]any{
 			"threshold_percent": thresholdPercent,
 			"error":             err.Error(),
 		})
+		return err
 	}
+
+	if g.log != nil {
+		g.log.Info("budget_alert_email_sent", map[string]any{
+			"threshold_percent": thresholdPercent,
+			"period_start":      periodStart.Format(time.RFC3339),
+		})
+	}
+	return nil
 }

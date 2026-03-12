@@ -15,6 +15,7 @@ type SMTPSender struct {
 	username string
 	password string
 	from     string
+	to       []string
 }
 
 func NewSMTPSender(cfg config.EmailConfig) *SMTPSender {
@@ -24,21 +25,24 @@ func NewSMTPSender(cfg config.EmailConfig) *SMTPSender {
 		username: cfg.Username,
 		password: cfg.Password,
 		from:     cfg.From,
+		to:       cfg.To,
 	}
 }
 
 func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
-	if len(msg.To) == 0 {
+	recipients := msg.To
+	if len(recipients) == 0 {
+		recipients = s.to
+	}
+	if len(recipients) == 0 {
 		return fmt.Errorf("no recipients provided")
 	}
 
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
-
 	auth := smtp.PlainAuth("", s.username, s.password, s.host)
 
-	body := buildPlainEmail(s.from, msg.To, msg.Subject, msg.Text)
-
-	return smtp.SendMail(addr, auth, s.from, msg.To, []byte(body))
+	body := buildPlainEmail(s.from, recipients, msg.Subject, msg.Text)
+	return smtp.SendMail(addr, auth, s.from, recipients, []byte(body))
 }
 
 func buildPlainEmail(from string, to []string, subject, text string) string {
