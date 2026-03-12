@@ -1,6 +1,6 @@
 {
   "server": { "addr": ":8080" },
-  "logging": { "level": "info", "json": true },
+  "logging": { "level": "debug", "json": false},
   "cache": { "enabled": true, "ttl": "30s", "max_keys": 10000 },
   "database": {
     "driver": "postgres",
@@ -8,7 +8,7 @@
   },
   "budget": {
     "enabled": true,
-    "monthly_usd": 0.0000001
+    "monthly_usd": 0.0000825
   },
   "routing": {
     "default_provider": "openai_primary",
