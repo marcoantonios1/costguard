@@ -16,6 +16,7 @@ import (
 	"github.com/marcoantonios1/costguard/internal/database"
 	"github.com/marcoantonios1/costguard/internal/gateway"
 	"github.com/marcoantonios1/costguard/internal/logging"
+	"github.com/marcoantonios1/costguard/internal/notify"
 	"github.com/marcoantonios1/costguard/internal/providers"
 	openai_provider "github.com/marcoantonios1/costguard/internal/providers/openai"
 	"github.com/marcoantonios1/costguard/internal/router"
@@ -76,17 +77,24 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		MonthlyUSD: cfg.Budget.MonthlyUSD,
 	})
 
-	gw, err := gateway.New(gateway.Deps{
-		Router:   rt,
-		Registry: reg,
-		Log:      log,
+	var notifier notify.Sender
+	if cfg.Notify.Email.Enabled {
+		notifier = notify.NewSMTPSender(cfg.Notify.Email)
+	} else {
+		notifier = notify.NewLogSender(log)
+	}
 
+	gw, err := gateway.New(gateway.Deps{
+		Router:           rt,
+		Registry:         reg,
+		Log:              log,
 		FallbackProvider: cfg.Routing.FallbackProvider,
 		Cache:            c,
 		CacheTTL:         cfg.Cache.TTL,
 		UsageStore:       usageStore,
 		BudgetChecker:    budgetSvc,
 		AlertStore:       alertStore,
+		Notifier:         notifier,
 	})
 	if err != nil {
 		log.Error("failed_to_create_gateway", map[string]any{"error": err})
@@ -142,5 +150,3 @@ func (a *App) Run() error {
 		return err
 	}
 }
-
-

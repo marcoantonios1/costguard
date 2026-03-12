@@ -17,6 +17,19 @@
       "gpt-4o-mini": "openai_primary"
     }
   },
+  "notify": {
+    "email": {
+      "enabled": true,
+      "host": "smtp.gmail.com",
+      "port": 587,
+      "username": "alerts@example.com",
+      "password": "your-app-password",
+      "from": "alerts@example.com",
+      "to": [
+        "marco@example.com"
+      ]
+    }
+  },
   "providers": {
     "openai": {
       "openai_primary": {
