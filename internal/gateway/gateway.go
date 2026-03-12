@@ -44,6 +44,11 @@ type BudgetChecker interface {
 	CheckMonthlyBudget(ctx context.Context, now time.Time) error
 }
 
+type AlertStore interface {
+	WasSent(ctx context.Context, periodStart time.Time, thresholdPercent int, alertType string) (bool, error)
+	MarkSent(ctx context.Context, periodStart time.Time, thresholdPercent int, alertType string) error
+}
+
 type Gateway struct {
 	router Router
 	reg    *providers.Registry
@@ -54,6 +59,7 @@ type Gateway struct {
 	cacheTTL      time.Duration
 	usageStore    usage.Store
 	budgetChecker BudgetChecker
+	alertStore    AlertStore
 }
 
 type Deps struct {
@@ -66,6 +72,7 @@ type Deps struct {
 	CacheTTL         time.Duration
 	UsageStore       usage.Store
 	BudgetChecker    BudgetChecker
+	AlertStore       AlertStore
 }
 
 type openAIUsageResponse struct {
@@ -94,6 +101,7 @@ func New(d Deps) (*Gateway, error) {
 		cacheTTL:      d.CacheTTL,
 		usageStore:    d.UsageStore,
 		budgetChecker: d.BudgetChecker,
+		alertStore:    d.AlertStore,
 	}, nil
 }
 
@@ -148,36 +156,49 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 	}
 
 	if g.budgetChecker != nil {
-	if err := g.budgetChecker.CheckMonthlyBudget(r.Context(), time.Now()); err != nil {
-		if errors.Is(err, budget.ErrMonthlyBudgetExceeded) {
-			if g.log != nil {
-				g.log.Error("monthly_budget_exceeded", map[string]any{
-					"request_id": server.RequestIDFromContext(r.Context()),
-				})
+		now := time.Now()
+
+		if err := g.budgetChecker.CheckMonthlyBudget(r.Context(), now); err != nil {
+			if errors.Is(err, budget.ErrMonthlyBudgetExceeded) {
+				g.emitMonthlyBudgetAlertOnce(r.Context(), now, 100)
+
+				if g.log != nil {
+					g.log.Error("monthly_budget_exceeded", map[string]any{
+						"request_id": server.RequestIDFromContext(r.Context()),
+						"path":       r.URL.Path,
+						"model":      model,
+						"provider":   providerName,
+					})
+				}
+
+				return newJSONErrorResponse(
+					r,
+					http.StatusPaymentRequired,
+					"monthly budget exceeded",
+				), nil
 			}
 
-			return newJSONErrorResponse(
-				r,
-				http.StatusPaymentRequired,
-				"monthly budget exceeded",
-			), nil
-		} else if errors.Is(err, budget.ErrMonthlyBudgetReachedNinetyPercent) {
-			if g.log != nil {
-				g.log.Warn("monthly_budget_reached_90_percent", map[string]any{
-					"request_id": server.RequestIDFromContext(r.Context()),
-				})
+			if errors.Is(err, budget.ErrMonthlyBudgetReachedNinetyPercent) {
+				g.emitMonthlyBudgetAlertOnce(r.Context(), now, 90)
+
+				if g.log != nil {
+					g.log.Warn("monthly_budget_reached_90_percent", map[string]any{
+						"request_id": server.RequestIDFromContext(r.Context()),
+					})
+				}
+			} else if errors.Is(err, budget.ErrMonthlyBudgetReachedEightyPercent) {
+				g.emitMonthlyBudgetAlertOnce(r.Context(), now, 80)
+
+				if g.log != nil {
+					g.log.Warn("monthly_budget_reached_80_percent", map[string]any{
+						"request_id": server.RequestIDFromContext(r.Context()),
+					})
+				}
+			} else {
+				return nil, err
 			}
-		} else if errors.Is(err, budget.ErrMonthlyBudgetReachedEightyPercent) {
-			if g.log != nil {
-				g.log.Warn("monthly_budget_reached_80_percent", map[string]any{
-					"request_id": server.RequestIDFromContext(r.Context()),
-				})
-			}
-		} else {
-			return nil, err
 		}
 	}
-}
 
 	resp, err := g.callProvider(r, bodyBytes, providerName)
 	if err == nil {
@@ -512,5 +533,60 @@ func (g *Gateway) meterResponse(
 				"error":      err.Error(),
 			})
 		}
+	}
+}
+
+func (g *Gateway) emitMonthlyBudgetAlertOnce(
+	ctx context.Context,
+	now time.Time,
+	thresholdPercent int,
+) {
+	if g.alertStore == nil || g.budgetChecker == nil {
+		return
+	}
+
+	periodStart := time.Date(now.UTC().Year(), now.UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
+	alertType := "monthly"
+
+	sent, err := g.alertStore.WasSent(ctx, periodStart, thresholdPercent, alertType)
+	if err != nil {
+		if g.log != nil {
+			g.log.Error("budget_alert_check_failed", map[string]any{
+				"threshold_percent": thresholdPercent,
+				"error":             err.Error(),
+			})
+		}
+		return
+	}
+
+	if sent {
+		return
+	}
+
+	if g.log != nil {
+		switch thresholdPercent {
+		case 80:
+			g.log.Warn("budget_80_percent_reached", map[string]any{
+				"threshold_percent": thresholdPercent,
+				"period_start":      periodStart.Format(time.RFC3339),
+			})
+		case 90:
+			g.log.Warn("budget_90_percent_reached", map[string]any{
+				"threshold_percent": thresholdPercent,
+				"period_start":      periodStart.Format(time.RFC3339),
+			})
+		case 100:
+			g.log.Error("budget_100_percent_reached", map[string]any{
+				"threshold_percent": thresholdPercent,
+				"period_start":      periodStart.Format(time.RFC3339),
+			})
+		}
+	}
+
+	if err := g.alertStore.MarkSent(ctx, periodStart, thresholdPercent, alertType); err != nil && g.log != nil {
+		g.log.Error("budget_alert_mark_sent_failed", map[string]any{
+			"threshold_percent": thresholdPercent,
+			"error":             err.Error(),
+		})
 	}
 }

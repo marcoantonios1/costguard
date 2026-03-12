@@ -31,15 +31,33 @@ func NewService(usage UsageReader, cfg Config) *Service {
 	}
 }
 
+func (s *Service) MonthlyWindow(now time.Time) (time.Time, time.Time) {
+	from := time.Date(now.UTC().Year(), now.UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
+	to := from.AddDate(0, 1, 0)
+	return from, to
+}
+
+func (s *Service) CurrentMonthlySpend(ctx context.Context, now time.Time) (float64, time.Time, time.Time, error) {
+	if s == nil {
+		return 0, time.Time{}, time.Time{}, nil
+	}
+
+	from, to := s.MonthlyWindow(now)
+
+	total, err := s.usage.GetTotalSpend(ctx, from, to)
+	if err != nil {
+		return 0, time.Time{}, time.Time{}, err
+	}
+
+	return total, from, to, nil
+}
+
 func (s *Service) CheckMonthlyBudget(ctx context.Context, now time.Time) error {
 	if s == nil || !s.cfg.Enabled || s.cfg.MonthlyUSD <= 0 {
 		return nil
 	}
 
-	from := time.Date(now.UTC().Year(), now.UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
-	to := from.AddDate(0, 1, 0)
-
-	total, err := s.usage.GetTotalSpend(ctx, from, to)
+	total, _, _, err := s.CurrentMonthlySpend(ctx, now)
 	if err != nil {
 		return err
 	}

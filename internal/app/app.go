@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/marcoantonios1/costguard/internal/alert"
 	"github.com/marcoantonios1/costguard/internal/budget"
 	"github.com/marcoantonios1/costguard/internal/cache"
 	"github.com/marcoantonios1/costguard/internal/config"
@@ -39,7 +40,6 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		adapter, err := openai_provider.NewClient(openai_provider.ClientConfig{
 			Name:    name,
 			BaseURL: p.BaseURL,
-			APIKey:  resolveEnv(p.APIKey),
 			Org:     p.Org,
 			Project: p.Project,
 			Timeout: p.Timeout,
@@ -67,6 +67,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	alertStore := alert.NewPostgresStore(pool)
 
 	usageStore := usage.NewPostgresStore(pool)
 
@@ -85,6 +86,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		CacheTTL:         cfg.Cache.TTL,
 		UsageStore:       usageStore,
 		BudgetChecker:    budgetSvc,
+		AlertStore:       alertStore,
 	})
 	if err != nil {
 		log.Error("failed_to_create_gateway", map[string]any{"error": err})
@@ -141,11 +143,4 @@ func (a *App) Run() error {
 	}
 }
 
-func resolveEnv(v string) string {
-	const prefix = "env:"
-	if len(v) > len(prefix) && v[:len(prefix)] == prefix {
-		key := v[len(prefix):]
-		return os.Getenv(key)
-	}
-	return v
-}
+
