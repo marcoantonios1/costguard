@@ -123,12 +123,20 @@ func Load(path string) (Config, error) {
 	c.Database.DSN = rc.Database.DSN
 	c.Budget = rc.Budget
 	c.Notify = rc.Notify
+
+	
 	if c.Notify.Email.Enabled {
 		if c.Notify.Email.Host == "" {
 			return c, errors.New("notify.email.host is required when email notifications are enabled")
 		}
 		if c.Notify.Email.Port <= 0 {
 			return c, errors.New("notify.email.port must be greater than 0 when email notifications are enabled")
+		}
+		if c.Notify.Email.Username == "" {
+			return c, errors.New("notify.email.username is required when email notifications are enabled")
+		}
+		if c.Notify.Email.Password == "" {
+			return c, errors.New("notify.email.password is required when email notifications are enabled")
 		}
 		if c.Notify.Email.From == "" {
 			return c, errors.New("notify.email.from is required when email notifications are enabled")
