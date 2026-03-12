@@ -13,6 +13,7 @@ type Config struct {
 	Cache     CacheConfig     `json:"cache"`
 	Database  DatabaseConfig  `json:"database"`
 	Budget    BudgetConfig    `json:"budget"`
+	Notify    NotifyConfig    `json:"notify"`
 	Routing   RoutingConfig   `json:"routing"`
 	Providers ProvidersConfig `json:"providers"`
 }
@@ -52,6 +53,20 @@ type BudgetConfig struct {
 	MonthlyUSD float64 `json:"monthly_usd"`
 }
 
+type NotifyConfig struct {
+	Email EmailConfig `json:"email"`
+}
+
+type EmailConfig struct {
+	Enabled  bool     `json:"enabled"`
+	Host     string   `json:"host"`
+	Port     int      `json:"port"`
+	Username string   `json:"username"`
+	Password string   `json:"password"`
+	From     string   `json:"from"`
+	To       []string `json:"to"`
+}
+
 type OpenAIProvider struct {
 	BaseURL string        `json:"base_url"` // default https://api.openai.com
 	APIKey  string        `json:"api_key"`
@@ -86,6 +101,7 @@ func Load(path string) (Config, error) {
 		Cache     rawCache       `json:"cache"`
 		Database  DatabaseConfig `json:"database"`
 		Budget    BudgetConfig   `json:"budget"`
+		Notify    NotifyConfig   `json:"notify"`
 		Routing   RoutingConfig  `json:"routing"`
 		Providers struct {
 			OpenAI map[string]rawOpenAIProvider `json:"openai"`
@@ -106,6 +122,21 @@ func Load(path string) (Config, error) {
 	c.Database = rc.Database
 	c.Database.DSN = rc.Database.DSN
 	c.Budget = rc.Budget
+	c.Notify = rc.Notify
+	if c.Notify.Email.Enabled {
+		if c.Notify.Email.Host == "" {
+			return c, errors.New("notify.email.host is required when email notifications are enabled")
+		}
+		if c.Notify.Email.Port <= 0 {
+			return c, errors.New("notify.email.port must be greater than 0 when email notifications are enabled")
+		}
+		if c.Notify.Email.From == "" {
+			return c, errors.New("notify.email.from is required when email notifications are enabled")
+		}
+		if len(c.Notify.Email.To) == 0 {
+			return c, errors.New("notify.email.to must contain at least one recipient when email notifications are enabled")
+		}
+	}
 	if rc.Cache.TTL != "" {
 		d, err := time.ParseDuration(rc.Cache.TTL)
 		if err != nil {
