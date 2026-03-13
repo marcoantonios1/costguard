@@ -65,8 +65,10 @@ Send a request using the OpenAI API format:
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
   -H "Content-Type: application/json" \
+  -H "X-Costguard-Team: backend" \
+  -H "X-Costguard-Project: chatbot" \
+  -H "X-Costguard-User: marco" \
   -d '{
     "model": "gpt-4o-mini",
     "messages": [
@@ -75,7 +77,9 @@ curl http://localhost:8080/v1/chat/completions \
   }'
 ```
 
-Your application can simply change the API base URL:
+Costguard injects the provider API key automatically.
+
+Your application only needs to change the API base URL:
 
 ```
 OPENAI_BASE_URL=http://localhost:8080
@@ -97,7 +101,7 @@ Run the container:
 
 ```bash
 docker run --rm -p 8080:8080 \
-  -e OPENAI_API_KEY="$OPENAI_API_KEY" \
+  --env-file .env \
   -v "$(pwd)/config.json:/config.json" \
   costguard
 ```
@@ -171,16 +175,44 @@ Example:
 }
 ```
 
-Environment variables can be referenced using:
+# Environment Variables
 
-```
-env:VARIABLE_NAME
-```
+Sensitive configuration values such as API keys, database credentials, and SMTP passwords
+should be provided through environment variables.
+
+Costguard supports referencing environment variables in `config.json` using the `env:` prefix.
 
 Example:
 
 ```
-env:OPENAI_API_KEY
+"api_key": "env:OPENAI_API_KEY"
+```
+
+### Create a `.env` file
+
+Create a `.env` file in the project root:
+
+```env
+OPENAI_API_KEY=your_openai_api_key
+
+COSTGUARD_DATABASE_URL=postgres://costguard:costguard@localhost:5432/costguard?sslmode=disable
+
+COSTGUARD_SMTP_USERNAME=your_email@gmail.com
+COSTGUARD_SMTP_PASSWORD=your_smtp_app_password
+COSTGUARD_SMTP_FROM=your_email@gmail.com
+COSTGUARD_ALERT_EMAIL_TO=alerts@example.com
+```
+
+Costguard automatically loads this file on startup.
+
+### Important
+
+Do **not commit `.env` to git**.
+
+Add this to `.gitignore`:
+
+```
+.env
 ```
 
 ---
