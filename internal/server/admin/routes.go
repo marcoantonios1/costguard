@@ -15,4 +15,5 @@ func Register(mux *http.ServeMux, d Deps) {
 
 	mux.HandleFunc("/admin/usage/summary", h.UsageSummary)
 	mux.HandleFunc("/admin/usage/teams", h.UsageTeams)
+	
 }

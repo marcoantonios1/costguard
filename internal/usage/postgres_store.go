@@ -103,6 +103,66 @@ func (s *PostgresStore) GetSpendByTeam(ctx context.Context, from, to time.Time) 
 	return result, nil
 }
 
+func (s *PostgresStore) GetSpendByProvider(ctx context.Context, from, to time.Time) ([]ProviderSpend, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT COALESCE(provider, ''), COALESCE(SUM(estimated_cost_usd), 0)
+		FROM usage_records
+		WHERE timestamp_utc >= $1
+		  AND timestamp_utc < $2
+		GROUP BY provider
+		ORDER BY SUM(estimated_cost_usd) DESC
+	`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []ProviderSpend
+	for rows.Next() {
+		var item ProviderSpend
+		if err := rows.Scan(&item.Provider, &item.Spend); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func (s *PostgresStore) GetSpendByModel(ctx context.Context, from, to time.Time) ([]ModelSpend, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT COALESCE(model, ''), COALESCE(SUM(estimated_cost_usd), 0)
+		FROM usage_records
+		WHERE timestamp_utc >= $1
+		  AND timestamp_utc < $2
+		GROUP BY model
+		ORDER BY SUM(estimated_cost_usd) DESC
+	`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []ModelSpend
+	for rows.Next() {
+		var item ModelSpend
+		if err := rows.Scan(&item.Model, &item.Spend); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 func nullIfEmpty(v string) any {
 	if v == "" {
 		return nil

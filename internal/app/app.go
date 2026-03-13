@@ -19,6 +19,7 @@ import (
 	"github.com/marcoantonios1/costguard/internal/notify"
 	"github.com/marcoantonios1/costguard/internal/providers"
 	openai_provider "github.com/marcoantonios1/costguard/internal/providers/openai"
+	"github.com/marcoantonios1/costguard/internal/report"
 	"github.com/marcoantonios1/costguard/internal/router"
 	"github.com/marcoantonios1/costguard/internal/server"
 	"github.com/marcoantonios1/costguard/internal/server/admin"
@@ -84,6 +85,9 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 	} else {
 		notifier = notify.NewLogSender(log)
 	}
+
+	reportSvc := report.NewService(usageStore)
+	_ = report.NewEmailService(reportSvc, notifier)
 
 	gw, err := gateway.New(gateway.Deps{
 		Router:           rt,
