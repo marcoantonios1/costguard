@@ -41,6 +41,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		adapter, err := openai_provider.NewClient(openai_provider.ClientConfig{
 			Name:    name,
 			BaseURL: p.BaseURL,
+			APIKey:  p.APIKey,
 			Org:     p.Org,
 			Project: p.Project,
 			Timeout: p.Timeout,
