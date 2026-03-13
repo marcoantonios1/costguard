@@ -4,11 +4,11 @@
   "cache": { "enabled": true, "ttl": "30s", "max_keys": 10000 },
   "database": {
     "driver": "postgres",
-    "dsn": "postgres://costguard:costguard@localhost:5432/costguard?sslmode=disable"
+    "dsn": "env:COSTGUARD_DATABASE_URL"
   },
   "budget": {
     "enabled": true,
-    "monthly_usd": 0.0000825
+    "monthly_usd": 1
   },
   "routing": {
     "default_provider": "openai_primary",
@@ -22,11 +22,11 @@
       "enabled": true,
       "host": "smtp.gmail.com",
       "port": 587,
-      "username": "alerts@example.com",
-      "password": "your-app-password",
-      "from": "alerts@example.com",
+      "username": "env:EMAIL_USERNAME",
+      "password": "env:EMAIL_PASSWORD",
+      "from": "env:EMAIL_FROM",
       "to": [
-        "marco@example.com"
+        "env:EMAIL_TO"
       ]
     }
   },

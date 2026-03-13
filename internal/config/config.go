@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -120,11 +121,13 @@ func Load(path string) (Config, error) {
 	c.Cache.Enabled = rc.Cache.Enabled
 	c.Cache.MaxKeys = rc.Cache.MaxKeys
 	c.Database = rc.Database
-	c.Database.DSN = rc.Database.DSN
+	c.Database.DSN = resolveEnv(rc.Database.DSN)
 	c.Budget = rc.Budget
 	c.Notify = rc.Notify
+	c.Notify.Email.Username = resolveEnv(rc.Notify.Email.Username)
+	c.Notify.Email.Password = resolveEnv(rc.Notify.Email.Password)
+	c.Notify.Email.From = resolveEnv(rc.Notify.Email.From)
 
-	
 	if c.Notify.Email.Enabled {
 		if c.Notify.Email.Host == "" {
 			return c, errors.New("notify.email.host is required when email notifications are enabled")
@@ -165,7 +168,7 @@ func Load(path string) (Config, error) {
 		}
 		c.Providers.OpenAI[name] = OpenAIProvider{
 			BaseURL: p.BaseURL,
-			APIKey:  p.APIKey,
+			APIKey:  resolveEnv(p.APIKey),
 			Org:     p.Org,
 			Project: p.Project,
 			Timeout: to,
@@ -180,4 +183,16 @@ func Load(path string) (Config, error) {
 	}
 
 	return c, nil
+}
+
+func resolveEnv(value string) string {
+	value = strings.TrimSpace(value)
+
+	const prefix = "env:"
+	if strings.HasPrefix(value, prefix) {
+		key := strings.TrimSpace(strings.TrimPrefix(value, prefix))
+		return strings.TrimSpace(os.Getenv(key))
+	}
+
+	return value
 }

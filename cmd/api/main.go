@@ -5,18 +5,19 @@ import (
 	"log"
 	"os"
 
+	"github.com/joho/godotenv"
 	"github.com/marcoantonios1/costguard/internal/app"
 	"github.com/marcoantonios1/costguard/internal/config"
 	"github.com/marcoantonios1/costguard/internal/logging"
 )
 
 func main() {
+	_ = godotenv.Load(".env")
 	var configPath string
 	flag.StringVar(&configPath, "config", "config.json", "Path to config file")
 	flag.Parse()
 
 	cfg, err := config.Load(configPath)
-	log.Printf("database driver=%q dsn=%q", cfg.Database.Driver, cfg.Database.DSN)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
