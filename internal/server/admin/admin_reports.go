@@ -21,6 +21,7 @@ func NewReportsHandler(reports *report.EmailService, log *logging.Log) *ReportsH
 }
 
 func (h *ReportsHandler) SendMonthlyReport(w http.ResponseWriter, r *http.Request) {
+	// err := h.reports.SendMonthlyUsageReportIfNotSent(r.Context(), time.Now())
 	err := h.reports.SendMonthlyUsageReport(r.Context(), time.Now())
 	if err != nil {
 

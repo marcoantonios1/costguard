@@ -28,9 +28,10 @@ import (
 )
 
 type App struct {
-	cfg    config.Config
-	log    *logging.Log
-	server *server.Server
+	cfg             config.Config
+	log             *logging.Log
+	server          *server.Server
+	reportScheduler *report.Scheduler
 }
 
 func New(cfg config.Config, log *logging.Log) (*App, error) {
@@ -90,6 +91,12 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 	reportDeliveryStore := report.NewPostgresDeliveryStore(pool)
 	reportEmailSvc := report.NewEmailService(reportSvc, notifier, reportDeliveryStore)
 
+	reportScheduler := report.NewScheduler(reportEmailSvc, log, report.SchedulerConfig{
+		Enabled:       cfg.Reports.MonthlyEnabled,
+		CheckInterval: cfg.Reports.CheckInterval,
+		RunOnStartup:  cfg.Reports.RunOnStartup,
+	})
+
 	gw, err := gateway.New(gateway.Deps{
 		Router:           rt,
 		Registry:         reg,
@@ -127,9 +134,12 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		Handler: handler,
 	})
 
-	_ = rt // will be used once openai_proxy handler is added
-
-	return &App{cfg: cfg, log: log, server: srv}, nil
+	return &App{
+		cfg:             cfg,
+		log:             log,
+		server:          srv,
+		reportScheduler: reportScheduler,
+	}, nil
 }
 
 func (a *App) Run() error {
@@ -137,7 +147,13 @@ func (a *App) Run() error {
 		return errors.New("server is nil")
 	}
 
-	// graceful shutdown
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+
+	if a.reportScheduler != nil {
+		a.reportScheduler.Start(appCtx)
+	}
+
 	errCh := make(chan error, 1)
 	go func() {
 		a.log.Info("server_start", map[string]any{"addr": a.cfg.Server.Addr})
@@ -150,10 +166,14 @@ func (a *App) Run() error {
 	select {
 	case sig := <-sigCh:
 		a.log.Info("shutdown_signal", map[string]any{"signal": sig.String()})
+		appCancel()
+
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return a.server.Shutdown(ctx)
+
 	case err := <-errCh:
+		appCancel()
 		a.log.Error("server_error", map[string]any{"error": err})
 		return err
 	}

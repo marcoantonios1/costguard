@@ -15,6 +15,7 @@ type Config struct {
 	Database  DatabaseConfig  `json:"database"`
 	Budget    BudgetConfig    `json:"budget"`
 	Notify    NotifyConfig    `json:"notify"`
+	Reports   ReportsConfig   `json:"reports"`
 	Routing   RoutingConfig   `json:"routing"`
 	Providers ProvidersConfig `json:"providers"`
 }
@@ -68,6 +69,12 @@ type EmailConfig struct {
 	To       []string `json:"to"`
 }
 
+type ReportsConfig struct {
+	MonthlyEnabled bool          `json:"monthly_enabled"`
+	CheckInterval  time.Duration `json:"check_interval"`
+	RunOnStartup   bool          `json:"run_on_startup"`
+}
+
 type OpenAIProvider struct {
 	BaseURL string        `json:"base_url"` // default https://api.openai.com
 	APIKey  string        `json:"api_key"`
@@ -96,6 +103,11 @@ func Load(path string) (Config, error) {
 		Project string `json:"project,omitempty"`
 		Timeout string `json:"timeout"`
 	}
+	type rawReports struct {
+		MonthlyEnabled bool   `json:"monthly_enabled"`
+		CheckInterval  string `json:"check_interval"`
+		RunOnStartup   bool   `json:"run_on_startup"`
+	}
 	type rawConfig struct {
 		Server    ServerConfig   `json:"server"`
 		Logging   LoggingConfig  `json:"logging"`
@@ -103,6 +115,7 @@ func Load(path string) (Config, error) {
 		Database  DatabaseConfig `json:"database"`
 		Budget    BudgetConfig   `json:"budget"`
 		Notify    NotifyConfig   `json:"notify"`
+		Reports   rawReports     `json:"reports"`
 		Routing   RoutingConfig  `json:"routing"`
 		Providers struct {
 			OpenAI map[string]rawOpenAIProvider `json:"openai"`
@@ -158,6 +171,16 @@ func Load(path string) (Config, error) {
 			return c, err
 		}
 		c.Cache.TTL = d
+	}
+
+	c.Reports.MonthlyEnabled = rc.Reports.MonthlyEnabled
+	c.Reports.RunOnStartup = rc.Reports.RunOnStartup
+	if rc.Reports.CheckInterval != "" {
+		d, err := time.ParseDuration(rc.Reports.CheckInterval)
+		if err != nil {
+			return c, err
+		}
+		c.Reports.CheckInterval = d
 	}
 
 	c.Providers.OpenAI = map[string]OpenAIProvider{}
