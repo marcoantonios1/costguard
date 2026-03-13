@@ -87,7 +87,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 	}
 
 	reportSvc := report.NewService(usageStore)
-	_ = report.NewEmailService(reportSvc, notifier)
+	reportEmailSvc := report.NewEmailService(reportSvc, notifier)
 
 	gw, err := gateway.New(gateway.Deps{
 		Router:           rt,
@@ -114,6 +114,8 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 
 	admin.Register(mux, admin.Deps{
 		UsageStore: usageStore,
+		Reports:    reportEmailSvc,
+		Log:        log,
 	})
 
 	// wrap middleware
