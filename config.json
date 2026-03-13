@@ -6,6 +6,11 @@
     "driver": "postgres",
     "dsn": "env:COSTGUARD_DATABASE_URL"
   },
+  "reports": {
+    "monthly_enabled": true,
+    "check_interval": "24h",
+    "run_on_startup": true
+  },
   "budget": {
     "enabled": true,
     "monthly_usd": 1
