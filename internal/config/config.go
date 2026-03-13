@@ -127,6 +127,10 @@ func Load(path string) (Config, error) {
 	c.Notify.Email.Username = resolveEnv(rc.Notify.Email.Username)
 	c.Notify.Email.Password = resolveEnv(rc.Notify.Email.Password)
 	c.Notify.Email.From = resolveEnv(rc.Notify.Email.From)
+	c.Notify.Email.To = make([]string, len(rc.Notify.Email.To))
+	for i, v := range rc.Notify.Email.To {
+		c.Notify.Email.To[i] = resolveEnv(v)
+	}
 
 	if c.Notify.Email.Enabled {
 		if c.Notify.Email.Host == "" {
