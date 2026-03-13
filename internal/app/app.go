@@ -87,7 +87,8 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 	}
 
 	reportSvc := report.NewService(usageStore)
-	reportEmailSvc := report.NewEmailService(reportSvc, notifier)
+	reportDeliveryStore := report.NewPostgresDeliveryStore(pool)
+	reportEmailSvc := report.NewEmailService(reportSvc, notifier, reportDeliveryStore)
 
 	gw, err := gateway.New(gateway.Deps{
 		Router:           rt,
