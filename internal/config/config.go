@@ -51,8 +51,10 @@ type ProvidersConfig struct {
 }
 
 type BudgetConfig struct {
-	Enabled    bool    `json:"enabled"`
-	MonthlyUSD float64 `json:"monthly_usd"`
+	Enabled    bool               `json:"enabled"`
+	MonthlyUSD float64            `json:"monthly_usd"`
+	Teams      map[string]float64 `json:"teams"`
+	Projects   map[string]float64 `json:"projects"`
 }
 
 type NotifyConfig struct {
