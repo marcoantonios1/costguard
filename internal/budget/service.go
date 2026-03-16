@@ -74,3 +74,37 @@ func (s *Service) CheckMonthlyBudget(ctx context.Context, now time.Time) error {
 
 	return nil
 }
+
+func (s *Service) GetMonthlyStatus(ctx context.Context, now time.Time) (Status, error) {
+	if s == nil {
+		return Status{}, nil
+	}
+
+	from := time.Date(now.UTC().Year(), now.UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
+	to := from.AddDate(0, 1, 0)
+
+	total, err := s.usage.GetTotalSpend(ctx, from, to)
+	if err != nil {
+		return Status{}, err
+	}
+
+	percentage := 0.0
+	if s.cfg.MonthlyUSD > 0 {
+		percentage = (total / s.cfg.MonthlyUSD) * 100
+	}
+
+	remaining := s.cfg.MonthlyUSD - total
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	return Status{
+		PeriodStart:        from,
+		PeriodEnd:          to,
+		MonthlyBudgetUSD:   s.cfg.MonthlyUSD,
+		CurrentSpendUSD:    total,
+		PercentageUsed:     percentage,
+		RemainingBudgetUSD: remaining,
+		Exceeded:           total >= s.cfg.MonthlyUSD && s.cfg.MonthlyUSD > 0,
+	}, nil
+}
