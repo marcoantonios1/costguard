@@ -194,6 +194,40 @@ func (s *PostgresStore) GetSpendByProject(ctx context.Context, from, to time.Tim
 	return result, rows.Err()
 }
 
+func (s *PostgresStore) GetSpendForTeam(ctx context.Context, team string, from, to time.Time) (float64, error) {
+	var total float64
+
+	err := s.db.QueryRow(ctx, `
+		SELECT COALESCE(SUM(estimated_cost_usd), 0)
+		FROM usage_records
+		WHERE timestamp_utc >= $1
+		  AND timestamp_utc < $2
+		  AND team = $3
+	`, from, to, team).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+
+	return total, nil
+}
+
+func (s *PostgresStore) GetSpendForProject(ctx context.Context, project string, from, to time.Time) (float64, error) {
+	var total float64
+
+	err := s.db.QueryRow(ctx, `
+		SELECT COALESCE(SUM(estimated_cost_usd), 0)
+		FROM usage_records
+		WHERE timestamp_utc >= $1
+		  AND timestamp_utc < $2
+		  AND project = $3
+	`, from, to, project).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+
+	return total, nil
+}
+
 func nullIfEmpty(v string) any {
 	if v == "" {
 		return nil
