@@ -23,8 +23,7 @@ WORKDIR /app
 COPY --from=builder /app/costguard .
 COPY --from=builder /app/config.json ./config.json
 COPY --from=builder /app/migrations ./migrations
-COPY --from=builder /app/.env ./.env
 
 EXPOSE 8080
 
-ENTRYPOINT ["/app/costguard"]
+ENTRYPOINT ["/app/costguard", "-config", "/app/config.json"]
