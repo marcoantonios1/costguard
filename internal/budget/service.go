@@ -6,17 +6,25 @@ import (
 	"time"
 )
 
-var ErrMonthlyBudgetExceeded = errors.New("monthly budget exceeded")
-var ErrMonthlyBudgetReachedEightyPercent = errors.New("monthly budget reached 80%")
-var ErrMonthlyBudgetReachedNinetyPercent = errors.New("monthly budget reached 90%")
+var (
+	ErrMonthlyBudgetExceeded             = errors.New("monthly budget exceeded")
+	ErrMonthlyBudgetReachedEightyPercent = errors.New("monthly budget reached 80%")
+	ErrMonthlyBudgetReachedNinetyPercent = errors.New("monthly budget reached 90%")
+	ErrTeamBudgetExceeded                = errors.New("team monthly budget exceeded")
+	ErrProjectBudgetExceeded             = errors.New("project monthly budget exceeded")
+)
 
 type UsageReader interface {
 	GetTotalSpend(ctx context.Context, from, to time.Time) (float64, error)
+	GetSpendForTeam(ctx context.Context, team string, from, to time.Time) (float64, error)
+	GetSpendForProject(ctx context.Context, project string, from, to time.Time) (float64, error)
 }
 
 type Config struct {
 	Enabled    bool
 	MonthlyUSD float64
+	Teams      map[string]float64
+	Projects   map[string]float64
 }
 
 type Service struct {
@@ -107,4 +115,61 @@ func (s *Service) GetMonthlyStatus(ctx context.Context, now time.Time) (Status, 
 		RemainingBudgetUSD: remaining,
 		Exceeded:           total >= s.cfg.MonthlyUSD && s.cfg.MonthlyUSD > 0,
 	}, nil
+}
+
+func (s *Service) CheckRequestBudget(
+	ctx context.Context,
+	now time.Time,
+	team string,
+	project string,
+) error {
+
+	if s == nil || !s.cfg.Enabled {
+		return nil
+	}
+
+	from := time.Date(now.UTC().Year(), now.UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
+	to := from.AddDate(0, 1, 0)
+
+	// -------- GLOBAL BUDGET --------
+	total, err := s.usage.GetTotalSpend(ctx, from, to)
+	if err != nil {
+		return err
+	}
+
+	if s.cfg.MonthlyUSD > 0 && total >= s.cfg.MonthlyUSD {
+		return ErrMonthlyBudgetExceeded
+	}
+
+	// -------- TEAM BUDGET --------
+	if team != "" {
+		if limit, ok := s.cfg.Teams[team]; ok {
+
+			spend, err := s.usage.GetSpendForTeam(ctx, team, from, to)
+			if err != nil {
+				return err
+			}
+
+			if limit > 0 && spend >= limit {
+				return ErrTeamBudgetExceeded
+			}
+		}
+	}
+
+	// -------- PROJECT BUDGET --------
+	if project != "" {
+		if limit, ok := s.cfg.Projects[project]; ok {
+
+			spend, err := s.usage.GetSpendForProject(ctx, project, from, to)
+			if err != nil {
+				return err
+			}
+
+			if limit > 0 && spend >= limit {
+				return ErrProjectBudgetExceeded
+			}
+		}
+	}
+
+	return nil
 }

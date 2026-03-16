@@ -63,8 +63,10 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 
 	if g.budgetChecker != nil {
 		now := time.Now()
+		team := r.Header.Get("X-Costguard-Team")
+		project := r.Header.Get("X-Costguard-Project")
 
-		if err := g.budgetChecker.CheckMonthlyBudget(r.Context(), now); err != nil {
+		if err := g.budgetChecker.CheckRequestBudget(r.Context(), now, team, project); err != nil {
 			if errors.Is(err, budget.ErrMonthlyBudgetExceeded) {
 				g.emitMonthlyBudgetAlertOnce(r.Context(), now, 100)
 
@@ -84,25 +86,43 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 				), nil
 			}
 
-			if errors.Is(err, budget.ErrMonthlyBudgetReachedNinetyPercent) {
-				g.emitMonthlyBudgetAlertOnce(r.Context(), now, 90)
-
+			if errors.Is(err, budget.ErrTeamBudgetExceeded) {
 				if g.log != nil {
-					g.log.Warn("monthly_budget_reached_90_percent", map[string]any{
+					g.log.Error("team_budget_exceeded", map[string]any{
 						"request_id": server.RequestIDFromContext(r.Context()),
+						"path":       r.URL.Path,
+						"team":       team,
+						"model":      model,
+						"provider":   providerName,
 					})
 				}
-			} else if errors.Is(err, budget.ErrMonthlyBudgetReachedEightyPercent) {
-				g.emitMonthlyBudgetAlertOnce(r.Context(), now, 80)
 
-				if g.log != nil {
-					g.log.Warn("monthly_budget_reached_80_percent", map[string]any{
-						"request_id": server.RequestIDFromContext(r.Context()),
-					})
-				}
-			} else {
-				return nil, err
+				return newJSONErrorResponse(
+					r,
+					http.StatusPaymentRequired,
+					"team monthly budget exceeded",
+				), nil
 			}
+
+			if errors.Is(err, budget.ErrProjectBudgetExceeded) {
+				if g.log != nil {
+					g.log.Error("project_budget_exceeded", map[string]any{
+						"request_id": server.RequestIDFromContext(r.Context()),
+						"path":       r.URL.Path,
+						"project":    project,
+						"model":      model,
+						"provider":   providerName,
+					})
+				}
+
+				return newJSONErrorResponse(
+					r,
+					http.StatusPaymentRequired,
+					"project monthly budget exceeded",
+				), nil
+			}
+
+			return nil, err
 		}
 	}
 

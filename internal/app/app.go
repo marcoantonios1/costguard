@@ -76,9 +76,11 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 	usageStore := usage.NewPostgresStore(pool)
 
 	budgetSvc := budget.NewService(usageStore, budget.Config{
-		Enabled:    cfg.Budget.Enabled,
-		MonthlyUSD: cfg.Budget.MonthlyUSD,
-	})
+	Enabled:    cfg.Budget.Enabled,
+	MonthlyUSD: cfg.Budget.MonthlyUSD,
+	Teams:      cfg.Budget.Teams,
+	Projects:   cfg.Budget.Projects,
+})
 
 	var notifier notify.Sender
 	if cfg.Notify.Email.Enabled {

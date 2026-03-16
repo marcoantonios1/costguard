@@ -17,7 +17,7 @@ type Router interface {
 }
 
 type BudgetChecker interface {
-	CheckMonthlyBudget(ctx context.Context, now time.Time) error
+	CheckRequestBudget(ctx context.Context, now time.Time, team string, project string) error
 }
 
 type AlertStore interface {
