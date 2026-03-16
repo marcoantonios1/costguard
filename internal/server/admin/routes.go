@@ -21,6 +21,7 @@ func Register(mux *http.ServeMux, d Deps) {
 
 	mux.HandleFunc("/admin/usage/summary", h.UsageSummary)
 	mux.HandleFunc("/admin/usage/teams", h.UsageTeams)
+	mux.HandleFunc("/admin/usage/projects", h.UsageProjects)
 
 	if d.Reports != nil {
 		reportsHandler := NewReportsHandler(d.Reports, d.Log)

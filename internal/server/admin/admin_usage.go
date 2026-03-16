@@ -56,6 +56,25 @@ func (h *AdminHandler) UsageTeams(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *AdminHandler) UsageProjects(w http.ResponseWriter, r *http.Request) {
+	from, to := currentMonthRange()
+
+	data, err := h.usageStore.GetSpendByProject(r.Context(), from, to)
+	if err != nil {
+		http.Error(w, "failed to load project usage", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, data)
+}
+
+func currentMonthRange() (time.Time, time.Time) {
+	now := time.Now().UTC()
+	from := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	to := from.AddDate(0, 1, 0)
+	return from, to
+}
+
 func parseRange(r *http.Request) (time.Time, time.Time, error) {
 	fromStr := r.URL.Query().Get("from")
 	toStr := r.URL.Query().Get("to")

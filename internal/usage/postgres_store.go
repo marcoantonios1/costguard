@@ -163,6 +163,37 @@ func (s *PostgresStore) GetSpendByModel(ctx context.Context, from, to time.Time)
 	return result, nil
 }
 
+func (s *PostgresStore) GetSpendByProject(ctx context.Context, from, to time.Time) ([]ProjectSpend, error) {
+	query := `
+	SELECT COALESCE(project, ''), COALESCE(SUM(estimated_cost_usd), 0)
+	FROM usage_records
+	WHERE timestamp_utc >= $1
+	  AND timestamp_utc < $2
+	GROUP BY project
+	ORDER BY SUM(estimated_cost_usd) DESC
+	`
+
+	rows, err := s.db.Query(ctx, query, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []ProjectSpend
+
+	for rows.Next() {
+		var p ProjectSpend
+
+		if err := rows.Scan(&p.Project, &p.Spend); err != nil {
+			return nil, err
+		}
+
+		result = append(result, p)
+	}
+
+	return result, rows.Err()
+}
+
 func nullIfEmpty(v string) any {
 	if v == "" {
 		return nil
