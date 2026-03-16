@@ -1,6 +1,6 @@
 {
   "server": { "addr": ":8080" },
-  "logging": { "level": "debug", "json": false},
+  "logging": { "level": "debug", "json": false },
   "cache": { "enabled": true, "ttl": "30s", "max_keys": 10000 },
   "database": {
     "driver": "postgres",
@@ -13,7 +13,15 @@
   },
   "budget": {
     "enabled": true,
-    "monthly_usd": 1
+    "monthly_usd": 100,
+    "teams": {
+      "backend": 40,
+      "mobile": 30
+    },
+    "projects": {
+      "chatbot": 25,
+      "analytics": 20
+    }
   },
   "routing": {
     "default_provider": "openai_primary",
@@ -30,9 +38,7 @@
       "username": "env:EMAIL_USERNAME",
       "password": "env:EMAIL_PASSWORD",
       "from": "env:EMAIL_FROM",
-      "to": [
-        "env:EMAIL_TO"
-      ]
+      "to": ["env:EMAIL_TO"]
     }
   },
   "providers": {

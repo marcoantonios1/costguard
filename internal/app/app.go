@@ -124,6 +124,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		UsageStore: usageStore,
 		Reports:    reportEmailSvc,
 		Log:        log,
+		Budget:     budgetSvc,
 	})
 
 	// wrap middleware

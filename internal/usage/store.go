@@ -11,4 +11,5 @@ type Store interface {
 	GetSpendByTeam(ctx context.Context, from, to time.Time) ([]TeamSpend, error)
 	GetSpendByProvider(ctx context.Context, from, to time.Time) ([]ProviderSpend, error)
 	GetSpendByModel(ctx context.Context, from, to time.Time) ([]ModelSpend, error)
+	GetSpendByProject(ctx context.Context, from, to time.Time) ([]ProjectSpend, error)
 }
