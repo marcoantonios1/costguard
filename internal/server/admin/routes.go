@@ -19,17 +19,17 @@ type Deps struct {
 func Register(mux *http.ServeMux, d Deps) {
 	h := NewAdminHandler(d.UsageStore)
 
-	mux.HandleFunc("/admin/usage/summary", h.UsageSummary)
-	mux.HandleFunc("/admin/usage/teams", h.UsageTeams)
-	mux.HandleFunc("/admin/usage/projects", h.UsageProjects)
+	mux.HandleFunc("/usage/summary", h.UsageSummary)
+	mux.HandleFunc("/usage/teams", h.UsageTeams)
+	mux.HandleFunc("/usage/projects", h.UsageProjects)
 
 	if d.Reports != nil {
 		reportsHandler := NewReportsHandler(d.Reports, d.Log)
-		mux.HandleFunc("/admin/reports/monthly/send", reportsHandler.SendMonthlyReport)
+		mux.HandleFunc("/reports/monthly/send", reportsHandler.SendMonthlyReport)
 	}
 
 	if d.Budget != nil {
 		budgetHandler := NewBudgetHandler(d.Budget)
-		mux.HandleFunc("/admin/budget/status", budgetHandler.Status)
+		mux.HandleFunc("/budget/status", budgetHandler.Status)
 	}
 }
