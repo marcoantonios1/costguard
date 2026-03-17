@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/marcoantonios1/costguard/internal/logging"
@@ -58,6 +59,35 @@ func LoggingMiddleware(lg *logging.Log, next http.Handler) http.Handler {
 			"duration_ms": time.Since(start).Milliseconds(),
 		})
 	})
+}
+
+func AdminAuth(apiKey string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+			auth := r.Header.Get("Authorization")
+
+			if auth == "" {
+				http.Error(w, "missing authorization header", http.StatusUnauthorized)
+				return
+			}
+
+			parts := strings.SplitN(auth, " ", 2)
+			if len(parts) != 2 || parts[0] != "Bearer" {
+				http.Error(w, "invalid authorization format", http.StatusUnauthorized)
+				return
+			}
+
+			token := parts[1]
+
+			if token != apiKey {
+				http.Error(w, "invalid api key", http.StatusUnauthorized)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 type statusWriter struct {
