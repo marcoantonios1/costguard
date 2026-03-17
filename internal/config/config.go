@@ -18,6 +18,7 @@ type Config struct {
 	Reports   ReportsConfig   `json:"reports"`
 	Routing   RoutingConfig   `json:"routing"`
 	Providers ProvidersConfig `json:"providers"`
+	Admin     AdminConfig     `json:"admin"`
 }
 
 type DatabaseConfig struct {
@@ -77,6 +78,10 @@ type ReportsConfig struct {
 	RunOnStartup   bool          `json:"run_on_startup"`
 }
 
+type AdminConfig struct {
+	APIKey string `json:"api_key"`
+}
+
 type OpenAIProvider struct {
 	BaseURL string        `json:"base_url"` // default https://api.openai.com
 	APIKey  string        `json:"api_key"`
@@ -118,6 +123,7 @@ func Load(path string) (Config, error) {
 		Budget    BudgetConfig   `json:"budget"`
 		Notify    NotifyConfig   `json:"notify"`
 		Reports   rawReports     `json:"reports"`
+		Admin     AdminConfig    `json:"admin"`
 		Routing   RoutingConfig  `json:"routing"`
 		Providers struct {
 			OpenAI map[string]rawOpenAIProvider `json:"openai"`
@@ -139,6 +145,8 @@ func Load(path string) (Config, error) {
 	c.Database.DSN = resolveEnv(rc.Database.DSN)
 	c.Budget = rc.Budget
 	c.Notify = rc.Notify
+	c.Admin = rc.Admin
+	c.Admin.APIKey = resolveEnv(rc.Admin.APIKey)
 	c.Notify.Email.Username = resolveEnv(rc.Notify.Email.Username)
 	c.Notify.Email.Password = resolveEnv(rc.Notify.Email.Password)
 	c.Notify.Email.From = resolveEnv(rc.Notify.Email.From)

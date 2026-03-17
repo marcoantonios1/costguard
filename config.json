@@ -6,6 +6,9 @@
     "driver": "postgres",
     "dsn": "env:COSTGUARD_DATABASE_URL"
   },
+  "admin": {
+    "api_key": "env:ADMIN_API_KEY"
+  },
   "reports": {
     "monthly_enabled": true,
     "check_interval": "24h",

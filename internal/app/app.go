@@ -76,11 +76,11 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 	usageStore := usage.NewPostgresStore(pool)
 
 	budgetSvc := budget.NewService(usageStore, budget.Config{
-	Enabled:    cfg.Budget.Enabled,
-	MonthlyUSD: cfg.Budget.MonthlyUSD,
-	Teams:      cfg.Budget.Teams,
-	Projects:   cfg.Budget.Projects,
-})
+		Enabled:    cfg.Budget.Enabled,
+		MonthlyUSD: cfg.Budget.MonthlyUSD,
+		Teams:      cfg.Budget.Teams,
+		Projects:   cfg.Budget.Projects,
+	})
 
 	var notifier notify.Sender
 	if cfg.Notify.Email.Enabled {
@@ -122,12 +122,18 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 
 	openai_http.Register(mux, openai_http.Deps{Gateway: gw})
 
-	admin.Register(mux, admin.Deps{
+	adminMux := http.NewServeMux()
+
+	admin.Register(adminMux, admin.Deps{
 		UsageStore: usageStore,
 		Reports:    reportEmailSvc,
 		Log:        log,
 		Budget:     budgetSvc,
 	})
+
+	protectedAdmin := server.AdminAuth(cfg.Admin.APIKey)(adminMux)
+
+	mux.Handle("/admin/", http.StripPrefix("/admin", protectedAdmin))
 
 	// wrap middleware
 	handler := server.LoggingMiddleware(log, mux)
