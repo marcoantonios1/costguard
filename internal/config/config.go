@@ -222,14 +222,14 @@ func Load(path string) (Config, error) {
 	return c, nil
 }
 
-func resolveEnv(value string) string {
-	value = strings.TrimSpace(value)
-
-	const prefix = "env:"
-	if strings.HasPrefix(value, prefix) {
-		key := strings.TrimSpace(strings.TrimPrefix(value, prefix))
-		return strings.TrimSpace(os.Getenv(key))
+func resolveEnv(val string) string {
+	if strings.HasPrefix(val, "env:") {
+		key := strings.TrimPrefix(val, "env:")
+		env := os.Getenv(key)
+		if env == "" {
+			panic("missing required env: " + key)
+		}
+		return env
 	}
-
-	return value
+	return val
 }
