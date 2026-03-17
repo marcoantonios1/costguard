@@ -18,6 +18,7 @@ type Config struct {
 	Reports   ReportsConfig   `json:"reports"`
 	Routing   RoutingConfig   `json:"routing"`
 	Providers ProvidersConfig `json:"providers"`
+	Admin     AdminConfig     `json:"admin"`
 }
 
 type DatabaseConfig struct {
@@ -75,6 +76,10 @@ type ReportsConfig struct {
 	MonthlyEnabled bool          `json:"monthly_enabled"`
 	CheckInterval  time.Duration `json:"check_interval"`
 	RunOnStartup   bool          `json:"run_on_startup"`
+}
+
+type AdminConfig struct {
+	APIKey string `json:"api_key"`
 }
 
 type OpenAIProvider struct {
