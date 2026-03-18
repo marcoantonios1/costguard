@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/marcoantonios1/costguard/internal/providers"
 )
 
 type ClientConfig struct {
@@ -236,4 +238,54 @@ func rawJSONResponse(req *http.Request, status int, srcHeader http.Header, body 
 		Body:       io.NopCloser(bytes.NewReader(body)),
 		Request:    req,
 	}
+}
+
+func (c *Client) ParseResponseMeta(body []byte) (providers.ResponseMeta, error) {
+	var resp struct {
+		Model string `json:"model"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return providers.ResponseMeta{}, err
+	}
+
+	return providers.ResponseMeta{
+		Model:            resp.Model,
+		PromptTokens:     resp.Usage.PromptTokens,
+		CompletionTokens: resp.Usage.CompletionTokens,
+		TotalTokens:      resp.Usage.TotalTokens,
+	}, nil
+}
+
+func (c *Client) NormalizeError(statusCode int, body []byte) ([]byte, error) {
+	// Anthropic errors usually look different, so normalize them.
+	var raw struct {
+		Type  string `json:"type"`
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	var out providers.ErrorBody
+
+	if err := json.Unmarshal(body, &raw); err == nil {
+		if raw.Error.Message != "" {
+			out.Error.Message = raw.Error.Message
+			out.Error.Type = raw.Error.Type
+			if out.Error.Type == "" {
+				out.Error.Type = "upstream_error"
+			}
+			return json.Marshal(out)
+		}
+	}
+
+	out.Error.Message = http.StatusText(statusCode)
+	out.Error.Type = "upstream_error"
+	return json.Marshal(out)
 }

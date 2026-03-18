@@ -2,11 +2,14 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/marcoantonios1/costguard/internal/providers"
 )
 
 type ClientConfig struct {
@@ -104,4 +107,40 @@ func joinURLPath(a, b string) string {
 	a = strings.TrimRight(a, "/")
 	b = strings.TrimLeft(b, "/")
 	return a + "/" + b
+}
+
+func (a *Client) ParseResponseMeta(body []byte) (providers.ResponseMeta, error) {
+	var resp struct {
+		Model string `json:"model"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return providers.ResponseMeta{}, err
+	}
+
+	return providers.ResponseMeta{
+		Model:            resp.Model,
+		PromptTokens:     resp.Usage.PromptTokens,
+		CompletionTokens: resp.Usage.CompletionTokens,
+		TotalTokens:      resp.Usage.TotalTokens,
+	}, nil
+}
+
+func (a *Client) NormalizeError(statusCode int, body []byte) ([]byte, error) {
+	var parsed providers.ErrorBody
+
+	// Try to preserve existing OpenAI-style error payload if already compatible.
+	if err := json.Unmarshal(body, &parsed); err == nil && parsed.Error.Message != "" {
+		return json.Marshal(parsed)
+	}
+
+	parsed.Error.Message = http.StatusText(statusCode)
+	parsed.Error.Type = "upstream_error"
+
+	return json.Marshal(parsed)
 }
