@@ -1,8 +1,11 @@
 package anthropic
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -10,11 +13,11 @@ import (
 )
 
 type ClientConfig struct {
-	Name              string
-	BaseURL           string
-	APIKey            string
-	AnthropicVersion  string
-	Timeout           time.Duration
+	Name             string
+	BaseURL          string
+	APIKey           string
+	AnthropicVersion string
+	Timeout          time.Duration
 }
 
 type Client struct {
@@ -66,31 +69,123 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 		return nil, fmt.Errorf("nil request")
 	}
 
-	upstreamURL := *c.base
-	upstreamURL.Path = joinURLPath(c.base.Path, req.URL.Path)
-	upstreamURL.RawQuery = req.URL.RawQuery
+	switch req.URL.Path {
+	case "/v1/chat/completions":
+		return c.doChatCompletions(ctx, req)
+	default:
+		return jsonResponse(
+			req,
+			http.StatusNotImplemented,
+			map[string]any{
+				"error": map[string]any{
+					"message": fmt.Sprintf("anthropic adapter does not support path %s yet", req.URL.Path),
+					"type":    "not_implemented",
+				},
+			},
+		)
+	}
+}
 
-	upstreamReq, err := http.NewRequestWithContext(ctx, req.Method, upstreamURL.String(), req.Body)
+func (c *Client) doChatCompletions(ctx context.Context, req *http.Request) (*http.Response, error) {
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	_ = req.Body.Close()
+
+	var oaReq openAIChatCompletionRequest
+	if err := json.Unmarshal(body, &oaReq); err != nil {
+		return jsonResponse(
+			req,
+			http.StatusBadRequest,
+			map[string]any{
+				"error": map[string]any{
+					"message": "invalid OpenAI chat completion request body",
+					"type":    "invalid_request_error",
+				},
+			},
+		)
+	}
+
+	anthReq, err := toAnthropicRequest(oaReq)
+	if err != nil {
+		return jsonResponse(
+			req,
+			http.StatusBadRequest,
+			map[string]any{
+				"error": map[string]any{
+					"message": err.Error(),
+					"type":    "invalid_request_error",
+				},
+			},
+		)
+	}
+
+	payload, err := json.Marshal(anthReq)
 	if err != nil {
 		return nil, err
 	}
 
-	upstreamReq.Header = make(http.Header, len(req.Header))
-	for k, vv := range req.Header {
-		for _, v := range vv {
-			upstreamReq.Header.Add(k, v)
-		}
+	upstreamURL := *c.base
+	upstreamURL.Path = joinURLPath(c.base.Path, "/v1/messages")
+
+	upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL.String(), bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
 	}
 
-	if upstreamReq.Header.Get("x-api-key") == "" && c.apiKey != "" {
+	upstreamReq.Header = make(http.Header)
+	copyAllowedHeaders(req.Header, upstreamReq.Header)
+
+	upstreamReq.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
 		upstreamReq.Header.Set("x-api-key", c.apiKey)
 	}
-
-	if upstreamReq.Header.Get("anthropic-version") == "" && c.anthropicVersion != "" {
+	if c.anthropicVersion != "" {
 		upstreamReq.Header.Set("anthropic-version", c.anthropicVersion)
 	}
 
-	return c.hc.Do(upstreamReq)
+	upstreamResp, err := c.hc.Do(upstreamReq)
+	if err != nil {
+		return nil, err
+	}
+	defer upstreamResp.Body.Close()
+
+	respBody, err := io.ReadAll(upstreamResp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if upstreamResp.StatusCode < 200 || upstreamResp.StatusCode >= 300 {
+		return rawJSONResponse(req, upstreamResp.StatusCode, upstreamResp.Header, respBody), nil
+	}
+
+	var anthResp anthropicMessagesResponse
+	if err := json.Unmarshal(respBody, &anthResp); err != nil {
+		return nil, fmt.Errorf("failed to parse anthropic response: %w", err)
+	}
+
+	normalized := toOpenAIResponse(oaReq.Model, anthResp)
+
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if orgID := upstreamResp.Header.Get("anthropic-organization-id"); orgID != "" {
+		header.Set("anthropic-organization-id", orgID)
+	}
+
+	return jsonResponseWithHeader(req, http.StatusOK, header, normalized)
+}
+
+func copyAllowedHeaders(src, dst http.Header) {
+	for k, vv := range src {
+		switch http.CanonicalHeaderKey(k) {
+		case "X-Request-Id", "X-Costguard-Team", "X-Costguard-Project", "X-Costguard-User":
+			for _, v := range vv {
+				dst.Add(k, v)
+			}
+		}
+	}
 }
 
 func joinURLPath(a, b string) string {
@@ -103,4 +198,42 @@ func joinURLPath(a, b string) string {
 	a = strings.TrimRight(a, "/")
 	b = strings.TrimLeft(b, "/")
 	return a + "/" + b
+}
+
+func jsonResponse(req *http.Request, status int, payload any) (*http.Response, error) {
+	return jsonResponseWithHeader(req, status, http.Header{
+		"Content-Type": []string{"application/json"},
+	}, payload)
+}
+
+func jsonResponseWithHeader(req *http.Request, status int, header http.Header, payload any) (*http.Response, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	return &http.Response{
+		StatusCode: status,
+		Status:     fmt.Sprintf("%d %s", status, http.StatusText(status)),
+		Header:     header,
+		Body:       io.NopCloser(bytes.NewReader(body)),
+		Request:    req,
+	}, nil
+}
+
+func rawJSONResponse(req *http.Request, status int, srcHeader http.Header, body []byte) *http.Response {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if v := srcHeader.Get("anthropic-organization-id"); v != "" {
+		header.Set("anthropic-organization-id", v)
+	}
+
+	return &http.Response{
+		StatusCode: status,
+		Status:     fmt.Sprintf("%d %s", status, http.StatusText(status)),
+		Header:     header,
+		Body:       io.NopCloser(bytes.NewReader(body)),
+		Request:    req,
+	}
 }
