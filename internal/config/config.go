@@ -231,7 +231,7 @@ func Load(path string) (Config, error) {
 
 		c.Providers.OpenAI[name] = OpenAIProvider{
 			BaseURL: p.BaseURL,
-			APIKey:  resolveEnv(p.APIKey),
+			APIKey:  resolveEnvIfPresent(p.APIKey),
 			Org:     p.Org,
 			Project: p.Project,
 			Timeout: to,
@@ -251,7 +251,7 @@ func Load(path string) (Config, error) {
 
 		c.Providers.Anthropic[name] = AnthropicProvider{
 			BaseURL:          p.BaseURL,
-			APIKey:           resolveEnv(p.APIKey),
+			APIKey:           resolveEnvIfPresent(p.APIKey),
 			AnthropicVersion: p.AnthropicVersion,
 			Timeout:          to,
 		}
@@ -262,6 +262,9 @@ func Load(path string) (Config, error) {
 	}
 	if c.Routing.DefaultProvider == "" {
 		return c, errors.New("routing.default_provider is required")
+	}
+	if !hasUsableProvider(c) {
+		return c, errors.New("at least one provider API key must be configured")
 	}
 
 	return c, nil
@@ -277,4 +280,26 @@ func resolveEnv(val string) string {
 		return env
 	}
 	return val
+}
+
+func resolveEnvIfPresent(val string) string {
+	if strings.HasPrefix(val, "env:") {
+		key := strings.TrimPrefix(val, "env:")
+		return os.Getenv(key)
+	}
+	return val
+}
+
+func hasUsableProvider(c Config) bool {
+	for _, p := range c.Providers.OpenAI {
+		if strings.TrimSpace(p.APIKey) != "" {
+			return true
+		}
+	}
+	for _, p := range c.Providers.Anthropic {
+		if strings.TrimSpace(p.APIKey) != "" {
+			return true
+		}
+	}
+	return false
 }
