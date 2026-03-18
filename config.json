@@ -1,19 +1,24 @@
 {
   "server": { "addr": ":8080" },
   "logging": { "level": "debug", "json": false },
+
   "cache": { "enabled": true, "ttl": "30s", "max_keys": 10000 },
+
   "database": {
     "driver": "postgres",
     "dsn": "env:COSTGUARD_DATABASE_URL"
   },
+
   "admin": {
     "api_key": "env:ADMIN_API_KEY"
   },
+
   "reports": {
     "monthly_enabled": true,
     "check_interval": "24h",
     "run_on_startup": true
   },
+
   "budget": {
     "enabled": true,
     "monthly_usd": 100,
@@ -26,13 +31,16 @@
       "analytics": 20
     }
   },
+
   "routing": {
     "default_provider": "openai_primary",
     "fallback_provider": "openai_backup",
     "model_to_provider": {
-      "gpt-4o-mini": "openai_primary"
+      "gpt-4o-mini": "openai_primary",
+      "claude-3-5-sonnet-latest": "anthropic_primary"
     }
   },
+
   "notify": {
     "email": {
       "enabled": true,
@@ -44,6 +52,7 @@
       "to": ["env:EMAIL_TO"]
     }
   },
+
   "providers": {
     "openai": {
       "openai_primary": {
@@ -54,6 +63,14 @@
       "openai_backup": {
         "base_url": "https://api.openai.com",
         "api_key": "env:OPENAI_API_KEY",
+        "timeout": "60s"
+      }
+    },
+    "anthropic": {
+      "anthropic_primary": {
+        "base_url": "https://api.anthropic.com",
+        "api_key": "env:ANTHROPIC_API_KEY",
+        "anthropic_version": "2023-06-01",
         "timeout": "60s"
       }
     }

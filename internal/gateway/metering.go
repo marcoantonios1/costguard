@@ -105,7 +105,31 @@ func (g *Gateway) meterResponse(
 		return
 	}
 
-	finalModel := resp.Model
+	p, err := g.reg.Get(providerName)
+	if err != nil {
+		if g.log != nil {
+			g.log.Error("metering_provider_lookup_failed", map[string]any{
+				"request_id": requestID,
+				"provider":   providerName,
+				"error":      err.Error(),
+			})
+		}
+		return
+	}
+
+	meta, err := p.ParseResponseMeta(body)
+	if err != nil {
+		if g.log != nil {
+			g.log.Error("metering_parse_failed", map[string]any{
+				"request_id": requestID,
+				"provider":   providerName,
+				"error":      err.Error(),
+			})
+		}
+		return
+	}
+
+	finalModel := meta.Model
 	if finalModel == "" {
 		finalModel = model
 	}
@@ -113,9 +137,9 @@ func (g *Gateway) meterResponse(
 	usageData := metering.Usage{
 		Provider:         providerName,
 		Model:            finalModel,
-		PromptTokens:     resp.Usage.PromptTokens,
-		CompletionTokens: resp.Usage.CompletionTokens,
-		TotalTokens:      resp.Usage.TotalTokens,
+		PromptTokens:     meta.PromptTokens,
+		CompletionTokens: meta.CompletionTokens,
+		TotalTokens:      meta.TotalTokens,
 		CacheHit:         false,
 	}
 

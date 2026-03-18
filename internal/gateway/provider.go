@@ -30,6 +30,29 @@ func (g *Gateway) callProvider(r *http.Request, bodyBytes []byte, providerName s
 		return nil, err
 	}
 
+	if resp != nil && resp.StatusCode >= 400 && resp.Body != nil {
+		body, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+
+		normalizedBody, normErr := p.NormalizeError(resp.StatusCode, body)
+		if normErr != nil {
+			return nil, normErr
+		}
+
+		resp.Body = io.NopCloser(bytes.NewReader(normalizedBody))
+		resp.ContentLength = int64(len(normalizedBody))
+		resp.Header.Set("Content-Type", "application/json")
+
+		if resp.StatusCode >= 500 && g.fallback != "" && providerName != g.fallback {
+			return nil, fmt.Errorf("upstream_5xx status=%d provider=%s", resp.StatusCode, providerName)
+		}
+
+		return resp, nil
+	}
+
 	if resp.StatusCode >= 500 && g.fallback != "" && providerName != g.fallback {
 		_ = resp.Body.Close()
 		return nil, fmt.Errorf("upstream_5xx status=%d provider=%s", resp.StatusCode, providerName)
