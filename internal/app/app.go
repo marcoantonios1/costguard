@@ -18,6 +18,7 @@ import (
 	"github.com/marcoantonios1/costguard/internal/logging"
 	"github.com/marcoantonios1/costguard/internal/notify"
 	"github.com/marcoantonios1/costguard/internal/providers"
+	anthropic_provider "github.com/marcoantonios1/costguard/internal/providers/anthropic"
 	openai_provider "github.com/marcoantonios1/costguard/internal/providers/openai"
 	"github.com/marcoantonios1/costguard/internal/report"
 	"github.com/marcoantonios1/costguard/internal/router"
@@ -40,6 +41,10 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 
 	// Register OpenAI provider instances from config
 	for name, p := range cfg.Providers.OpenAI {
+		if p.APIKey == "" {
+			log.Info("skip_openai_provider_without_api_key", map[string]any{"name": name})
+			continue
+		}
 		adapter, err := openai_provider.NewClient(openai_provider.ClientConfig{
 			Name:    name,
 			BaseURL: p.BaseURL,
@@ -50,6 +55,27 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		})
 		if err != nil {
 			log.Error("failed_to_create_openai_client", map[string]any{"name": name, "error": err})
+			return nil, err
+		}
+		reg.Register(name, adapter)
+	}
+
+	// Register Anthropic provider instances from config
+	for name, p := range cfg.Providers.Anthropic {
+		if p.APIKey == "" {
+			log.Info("skip_anthropic_provider_without_api_key", map[string]any{"name": name})
+			continue
+		}
+
+		adapter, err := anthropic_provider.NewClient(anthropic_provider.ClientConfig{
+			Name:             name,
+			BaseURL:          p.BaseURL,
+			APIKey:           p.APIKey,
+			AnthropicVersion: p.AnthropicVersion,
+			Timeout:          p.Timeout,
+		})
+		if err != nil {
+			log.Error("failed_to_create_anthropic_client", map[string]any{"name": name, "error": err})
 			return nil, err
 		}
 		reg.Register(name, adapter)
