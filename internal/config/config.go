@@ -1,3 +1,4 @@
+// internal/config/config.go
 package config
 
 import (
@@ -48,7 +49,8 @@ type RoutingConfig struct {
 }
 
 type ProvidersConfig struct {
-	OpenAI map[string]OpenAIProvider `json:"openai"` // named instances
+	OpenAI    map[string]OpenAIProvider    `json:"openai"`
+	Anthropic map[string]AnthropicProvider `json:"anthropic"`
 }
 
 type BudgetConfig struct {
@@ -83,26 +85,34 @@ type AdminConfig struct {
 }
 
 type OpenAIProvider struct {
-	BaseURL string        `json:"base_url"` // default https://api.openai.com
+	BaseURL string        `json:"base_url"`
 	APIKey  string        `json:"api_key"`
 	Org     string        `json:"org,omitempty"`
 	Project string        `json:"project,omitempty"`
 	Timeout time.Duration `json:"timeout"`
 }
 
+type AnthropicProvider struct {
+	BaseURL          string        `json:"base_url"`
+	APIKey           string        `json:"api_key"`
+	AnthropicVersion string        `json:"anthropic_version,omitempty"`
+	Timeout          time.Duration `json:"timeout"`
+}
+
 func Load(path string) (Config, error) {
 	var c Config
+
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return c, err
 	}
 
-	// Decode with durations as strings by using a shadow type
 	type rawCache struct {
 		Enabled bool   `json:"enabled"`
 		TTL     string `json:"ttl"`
 		MaxKeys int    `json:"max_keys"`
 	}
+
 	type rawOpenAIProvider struct {
 		BaseURL string `json:"base_url"`
 		APIKey  string `json:"api_key"`
@@ -110,11 +120,20 @@ func Load(path string) (Config, error) {
 		Project string `json:"project,omitempty"`
 		Timeout string `json:"timeout"`
 	}
+
+	type rawAnthropicProvider struct {
+		BaseURL          string `json:"base_url"`
+		APIKey           string `json:"api_key"`
+		AnthropicVersion string `json:"anthropic_version,omitempty"`
+		Timeout          string `json:"timeout"`
+	}
+
 	type rawReports struct {
 		MonthlyEnabled bool   `json:"monthly_enabled"`
 		CheckInterval  string `json:"check_interval"`
 		RunOnStartup   bool   `json:"run_on_startup"`
 	}
+
 	type rawConfig struct {
 		Server    ServerConfig   `json:"server"`
 		Logging   LoggingConfig  `json:"logging"`
@@ -126,7 +145,8 @@ func Load(path string) (Config, error) {
 		Admin     AdminConfig    `json:"admin"`
 		Routing   RoutingConfig  `json:"routing"`
 		Providers struct {
-			OpenAI map[string]rawOpenAIProvider `json:"openai"`
+			OpenAI    map[string]rawOpenAIProvider    `json:"openai"`
+			Anthropic map[string]rawAnthropicProvider `json:"anthropic"`
 		} `json:"providers"`
 	}
 
@@ -141,12 +161,16 @@ func Load(path string) (Config, error) {
 
 	c.Cache.Enabled = rc.Cache.Enabled
 	c.Cache.MaxKeys = rc.Cache.MaxKeys
+
 	c.Database = rc.Database
 	c.Database.DSN = resolveEnv(rc.Database.DSN)
+
 	c.Budget = rc.Budget
 	c.Notify = rc.Notify
+
 	c.Admin = rc.Admin
 	c.Admin.APIKey = resolveEnv(rc.Admin.APIKey)
+
 	c.Notify.Email.Username = resolveEnv(rc.Notify.Email.Username)
 	c.Notify.Email.Password = resolveEnv(rc.Notify.Email.Password)
 	c.Notify.Email.From = resolveEnv(rc.Notify.Email.From)
@@ -175,6 +199,7 @@ func Load(path string) (Config, error) {
 			return c, errors.New("notify.email.to must contain at least one recipient when email notifications are enabled")
 		}
 	}
+
 	if rc.Cache.TTL != "" {
 		d, err := time.ParseDuration(rc.Cache.TTL)
 		if err != nil {
@@ -203,12 +228,32 @@ func Load(path string) (Config, error) {
 			}
 			to = d
 		}
+
 		c.Providers.OpenAI[name] = OpenAIProvider{
 			BaseURL: p.BaseURL,
 			APIKey:  resolveEnv(p.APIKey),
 			Org:     p.Org,
 			Project: p.Project,
 			Timeout: to,
+		}
+	}
+
+	c.Providers.Anthropic = map[string]AnthropicProvider{}
+	for name, p := range rc.Providers.Anthropic {
+		var to time.Duration
+		if p.Timeout != "" {
+			d, err := time.ParseDuration(p.Timeout)
+			if err != nil {
+				return c, err
+			}
+			to = d
+		}
+
+		c.Providers.Anthropic[name] = AnthropicProvider{
+			BaseURL:          p.BaseURL,
+			APIKey:           resolveEnv(p.APIKey),
+			AnthropicVersion: p.AnthropicVersion,
+			Timeout:          to,
 		}
 	}
 
