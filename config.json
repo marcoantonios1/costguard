@@ -36,7 +36,8 @@
     "default_provider": "openai_primary",
     "fallback_provider": "openai_backup",
     "model_to_provider": {
-      "gpt-4o-mini": "openai_primary"
+      "gpt-4o-mini": "openai_primary",
+      "claude-3-5-sonnet-latest": "anthropic_primary"
     }
   },
 
