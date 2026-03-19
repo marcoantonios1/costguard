@@ -126,29 +126,18 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 		}
 	}
 
-	resp, err := g.callProvider(r, bodyBytes, providerName)
-	if err == nil {
-		return g.maybeStoreAndReturn(r, resp, providerName, model, cacheable, cacheKey)
+	if g.log != nil {
+		g.log.Info("provider_call", map[string]any{
+			"request_id": server.RequestIDFromContext(r.Context()),
+			"provider":   providerName,
+			"path":       r.URL.Path,
+		})
 	}
 
-	shouldTryFallback := g.fallback != "" && g.fallback != providerName
-	if shouldTryFallback {
-		if g.log != nil {
-			g.log.Error("provider_failed_try_fallback", map[string]any{
-				"request_id": server.RequestIDFromContext(r.Context()),
-				"primary":    providerName,
-				"fallback":   g.fallback,
-				"err":        err.Error(),
-			})
-		}
-
-		resp, err = g.callProvider(r, bodyBytes, g.fallback)
-		if err != nil {
-			return nil, err
-		}
-
-		return g.maybeStoreAndReturn(r, resp, g.fallback, model, cacheable, cacheKey)
+	resp, actualProvider, err := g.callProviderWithFallback(r, providerName)
+	if err != nil {
+		return nil, err
 	}
 
-	return nil, err
+	return g.maybeStoreAndReturn(r, resp, actualProvider, model, cacheable, cacheKey)
 }
