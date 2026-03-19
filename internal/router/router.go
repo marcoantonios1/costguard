@@ -15,6 +15,7 @@ func New(cfg Config) *Router {
 	if m == nil {
 		m = map[string]string{}
 	}
+
 	return &Router{
 		defaultProvider: cfg.DefaultProvider,
 		modelToProvider: m,
@@ -22,20 +23,33 @@ func New(cfg Config) *Router {
 }
 
 func (r *Router) PickProvider(model string) string {
-	if model == "" {
-		return r.defaultProvider
+	if provider := r.pickFromExactMapping(model); provider != "" {
+		return provider
 	}
 
-	// 1. Exact config mapping (highest priority)
+	if provider := r.pickFromMatchers(model); provider != "" {
+		return provider
+	}
+
+	return r.defaultProvider
+}
+
+func (r *Router) pickFromExactMapping(model string) string {
+	if model == "" {
+		return ""
+	}
+
 	if p, ok := r.modelToProvider[model]; ok && p != "" {
 		return p
 	}
 
-	// 2. Pattern-based matching
-	if matched := MatchProviderByModel(model); matched != "" {
-		return matched
+	return ""
+}
+
+func (r *Router) pickFromMatchers(model string) string {
+	if model == "" {
+		return ""
 	}
 
-	// 3. Default fallback
-	return r.defaultProvider
+	return MatchProviderByModel(model)
 }
