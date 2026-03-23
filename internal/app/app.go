@@ -38,6 +38,7 @@ type App struct {
 func New(cfg config.Config, log *logging.Log) (*App, error) {
 	// Provider registry
 	reg := providers.NewRegistry()
+	availableProviders := map[string]bool{}
 
 	// Register OpenAI provider instances from config
 	for name, p := range cfg.Providers.OpenAI {
@@ -58,6 +59,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 			return nil, err
 		}
 		reg.Register(name, adapter)
+		availableProviders[name] = true
 	}
 
 	// Register Anthropic provider instances from config
@@ -79,13 +81,16 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 			return nil, err
 		}
 		reg.Register(name, adapter)
+		availableProviders[name] = true
 	}
 
 	// Router
 	rt := router.New(router.Config{
-		DefaultProvider: cfg.Routing.DefaultProvider,
-		ModelToProvider: cfg.Routing.ModelToProvider,
-	})
+	DefaultProvider:    cfg.Routing.DefaultProvider,
+	ModelToProvider:    cfg.Routing.ModelToProvider,
+	AvailableProviders: availableProviders,
+	Log:                log,
+})
 
 	var c cache.Cache
 	if cfg.Cache.Enabled {
