@@ -59,51 +59,64 @@ func (g *Gateway) maybeStoreAndReturn(
 	return responseFromCacheEntry(r, entry), nil
 }
 
-func (g *Gateway) callProviderWithFallback(r *http.Request, providerName string) (*http.Response, string, error) {
-	resp, err := g.callSingleProvider(r, providerName)
+func (g *Gateway) callProviderWithFallback(r *http.Request, providerName string, bodyBytes []byte, originalModel string) (*http.Response, string, string, error) {
+	resp, err := g.callSingleProvider(r, providerName, bodyBytes)
 	if err == nil {
-		return resp, providerName, nil
+		return resp, providerName, originalModel, nil
 	}
 
 	if g.fallback == "" || providerName == g.fallback || !isRetryableProviderError(err) {
-		return nil, providerName, err
+		return nil, providerName, originalModel, err
+	}
+
+	fallbackModel := originalModel
+	rewrittenBody := bodyBytes
+
+	if compatible := g.compatibleModelForProvider(originalModel, g.fallback); compatible != "" && compatible != originalModel {
+		var rewriteErr error
+		rewrittenBody, rewriteErr = rewriteModelInBody(bodyBytes, compatible)
+		if rewriteErr != nil {
+			return nil, g.fallback, originalModel, rewriteErr
+		}
+		fallbackModel = compatible
 	}
 
 	if g.log != nil {
 		g.log.Error("provider_failed_try_fallback", map[string]any{
-			"request_id": server.RequestIDFromContext(r.Context()),
-			"primary":    providerName,
-			"fallback":   g.fallback,
-			"err":        err.Error(),
+			"request_id":     server.RequestIDFromContext(r.Context()),
+			"primary":        providerName,
+			"fallback":       g.fallback,
+			"original_model": originalModel,
+			"fallback_model": fallbackModel,
+			"err":            err.Error(),
 		})
 	}
 
-	fallbackResp, fallbackErr := g.callSingleProvider(r, g.fallback)
+	fallbackResp, fallbackErr := g.callSingleProvider(r, g.fallback, rewrittenBody)
 	if fallbackErr != nil {
-		return nil, g.fallback, fallbackErr
+		return nil, g.fallback, fallbackModel, fallbackErr
 	}
 
 	if g.log != nil {
 		g.log.Info("fallback_used", map[string]any{
-			"request_id": server.RequestIDFromContext(r.Context()),
-			"primary":    providerName,
-			"fallback":   g.fallback,
+			"request_id":     server.RequestIDFromContext(r.Context()),
+			"primary":        providerName,
+			"fallback":       g.fallback,
+			"original_model": originalModel,
+			"fallback_model": fallbackModel,
 		})
 	}
 
-	return fallbackResp, g.fallback, nil
+	return fallbackResp, g.fallback, fallbackModel, nil
 }
 
-func (g *Gateway) callSingleProvider(r *http.Request, providerName string) (*http.Response, error) {
+func (g *Gateway) callSingleProvider(r *http.Request, providerName string, bodyBytes []byte) (*http.Response, error) {
 	p, err := g.reg.Get(providerName)
 	if err != nil {
 		return nil, err
 	}
 
-	reqCopy, err := cloneRequest(r)
-	if err != nil {
-		return nil, err
-	}
+	reqCopy := cloneRequestWithBody(r, bodyBytes)
 
 	resp, err := p.Do(reqCopy.Context(), reqCopy)
 	if err != nil {
@@ -153,22 +166,9 @@ func isRetryableProviderError(err error) bool {
 	}
 }
 
-func cloneRequest(r *http.Request) (*http.Request, error) {
-	var bodyBytes []byte
-	var err error
-
-	if r.Body != nil {
-		bodyBytes, err = io.ReadAll(r.Body)
-		if err != nil {
-			return nil, err
-		}
-		_ = r.Body.Close()
-		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-	}
-
+func cloneRequestWithBody(r *http.Request, bodyBytes []byte) *http.Request {
 	reqCopy := r.Clone(r.Context())
 	reqCopy.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	reqCopy.ContentLength = int64(len(bodyBytes))
-
-	return reqCopy, nil
+	return reqCopy
 }

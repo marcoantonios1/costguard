@@ -134,10 +134,10 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 		})
 	}
 
-	resp, actualProvider, err := g.callProviderWithFallback(r, providerName)
+	resp, actualProvider, finalModel, err := g.callProviderWithFallback(r, providerName, bodyBytes, model)
 	if err != nil {
 		return nil, err
 	}
 
-	return g.maybeStoreAndReturn(r, resp, actualProvider, model, cacheable, cacheKey)
+	return g.maybeStoreAndReturn(r, resp, actualProvider, finalModel, cacheable, cacheKey)
 }
