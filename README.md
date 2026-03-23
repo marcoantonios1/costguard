@@ -1,20 +1,15 @@
 # Costguard
 
-Costguard is an **OpenAI-compatible AI gateway written in Go**.
+Costguard is an AI gateway that adds:
 
-It sits between your application and LLM providers and adds capabilities like:
+- Multi-provider routing (OpenAI, Anthropic, ...)
+- Cost tracking and budgeting
+- Smart fallback across providers
+- Model compatibility mapping
+- Request caching
+- Usage analytics and reporting
 
-- smart provider routing
-- response caching
-- usage and cost tracking
-- provider fallback
-- centralized logging
-
-without requiring changes to your existing OpenAI client code.
-
-Your application continues using the **OpenAI API format**, while Costguard handles the control layer.
-
-Think of Costguard as **a lightweight API gateway for LLM traffic**.
+All without changing your application code.
 
 ---
 
@@ -31,25 +26,15 @@ Costguard solves these problems by introducing a **thin gateway layer** that man
 
 ---
 
-# High-Level Architecture
+## 🏗 Architecture
 
-```
-Your App
-   │
-   ▼
-Costguard
-   │
-   ├── Router (model → provider)
-   ├── Cache (reuse identical responses)
-   ├── Metering (usage tracking & cost estimation)
-   ▼
-Provider Adapter
-   │
-   ▼
-LLM Provider API
-```
+Client → Costguard → Provider (OpenAI / Anthropic / ...)
 
-Your application talks to Costguard using **standard OpenAI API requests**.
+Costguard acts as a proxy that:
+- Selects the best provider
+- Tracks usage and cost
+- Applies caching and budgets
+- Falls back on failures
 
 ---
 
@@ -120,6 +105,39 @@ costguard/
 ├── go.mod
 └── README.md
 ```
+
+---
+
+## ✨ Features
+
+### 🔀 Multi-Provider Routing
+Route requests to different providers based on model or config.
+
+### 🔁 Fallback System
+Automatically retry with a fallback provider if the primary fails.
+
+### 🔄 Model Compatibility Mapping
+Map models across providers when fallback occurs:
+
+Example:
+claude-3-5-sonnet-latest → gpt-4o-mini
+
+### 🚫 Provider Availability Awareness
+Skip providers that are not configured or unavailable.
+
+### 💾 Caching
+In-memory cache to reduce cost and latency.
+
+### 💰 Cost Tracking
+Track token usage and estimated cost per request.
+
+### 📊 Budget Enforcement
+- Global monthly budget
+- Per-team and per-project limits
+
+### 📧 Reporting & Alerts
+- Scheduled reports
+- Email notifications
 
 ---
 
@@ -206,52 +224,16 @@ Add this to `.gitignore`:
 
 ---
 
-# Design Goals
+## 🛣 Roadmap
 
-Costguard follows a few core design principles.
-
-### OpenAI Compatibility
-
-Existing OpenAI clients should work without modification.
-
-### Single Binary
-
-The gateway runs as a single Go binary for simplicity and easy deployment.
-
-### Incremental Architecture
-
-The codebase is structured so additional providers, policies, and infrastructure can be added without refactoring the core.
-
-### Low Operational Overhead
-
-The first versions should be easy to run locally and deploy anywhere.
-
-
-# Development
-
-Requirements:
-
-```
-Go 1.22+
-```
-
-Run locally:
-
-```bash
-go run ./cmd/api -config ./config.json
-```
-
-Test the health endpoint:
-
-```bash
-curl http://localhost:8080/healthz
-```
-
-Expected response:
-
-```
-ok
-```
+- [x] Multi-provider routing
+- [x] Fallback system
+- [x] Model compatibility mapping
+- [x] Budget enforcement
+- [x] Reporting system
+- [ ] Smart routing (cost/performance optimization)
+- [ ] Semantic caching
+- [ ] Agent integration
 
 ---
 
