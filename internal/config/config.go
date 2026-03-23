@@ -43,9 +43,10 @@ type CacheConfig struct {
 }
 
 type RoutingConfig struct {
-	DefaultProvider  string            `json:"default_provider"`
-	FallbackProvider string            `json:"fallback_provider"`
-	ModelToProvider  map[string]string `json:"model_to_provider"`
+	DefaultProvider    string                       `json:"default_provider"`
+	FallbackProvider   string                       `json:"fallback_provider"`
+	ModelToProvider    map[string]string            `json:"model_to_provider"`
+	ModelCompatibility map[string]map[string]string `json:"model_compatibility"`
 }
 
 type ProvidersConfig struct {
