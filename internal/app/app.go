@@ -126,16 +126,17 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 	})
 
 	gw, err := gateway.New(gateway.Deps{
-		Router:           rt,
-		Registry:         reg,
-		Log:              log,
-		FallbackProvider: cfg.Routing.FallbackProvider,
-		Cache:            c,
-		CacheTTL:         cfg.Cache.TTL,
-		UsageStore:       usageStore,
-		BudgetChecker:    budgetSvc,
-		AlertStore:       alertStore,
-		Notifier:         notifier,
+		Router:             rt,
+		Registry:           reg,
+		Log:                log,
+		FallbackProvider:   cfg.Routing.FallbackProvider,
+		ModelCompatibility: cfg.Routing.ModelCompatibility,
+		Cache:              c,
+		CacheTTL:           cfg.Cache.TTL,
+		UsageStore:         usageStore,
+		BudgetChecker:      budgetSvc,
+		AlertStore:         alertStore,
+		Notifier:           notifier,
 	})
 	if err != nil {
 		log.Error("failed_to_create_gateway", map[string]any{"error": err})
