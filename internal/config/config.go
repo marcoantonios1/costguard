@@ -49,9 +49,10 @@ type RoutingConfig struct {
 }
 
 type ProvidersConfig struct {
-	OpenAI    map[string]OpenAIProvider    `json:"openai"`
-	Anthropic map[string]AnthropicProvider `json:"anthropic"`
-	Gemini    map[string]GeminiProvider    `json:"gemini"`
+	OpenAI           map[string]OpenAIProvider           `json:"openai"`
+	Anthropic        map[string]AnthropicProvider        `json:"anthropic"`
+	Gemini           map[string]GeminiProvider           `json:"gemini"`
+	OpenAICompatible map[string]OpenAICompatibleProvider `json:"openai_compatible"`
 }
 
 type BudgetConfig struct {
@@ -106,6 +107,12 @@ type GeminiProvider struct {
 	Timeout time.Duration `json:"timeout"`
 }
 
+type OpenAICompatibleProvider struct {
+	BaseURL string        `json:"base_url"`
+	APIKey  string        `json:"api_key"`
+	Timeout time.Duration `json:"timeout"`
+}
+
 func Load(path string) (Config, error) {
 	var c Config
 
@@ -141,6 +148,12 @@ func Load(path string) (Config, error) {
 		Timeout string `json:"timeout"`
 	}
 
+	type rawOpenAICompatibleProvider struct {
+		BaseURL string `json:"base_url"`
+		APIKey  string `json:"api_key"`
+		Timeout string `json:"timeout"`
+	}
+
 	type rawReports struct {
 		MonthlyEnabled bool   `json:"monthly_enabled"`
 		CheckInterval  string `json:"check_interval"`
@@ -158,9 +171,10 @@ func Load(path string) (Config, error) {
 		Admin     AdminConfig    `json:"admin"`
 		Routing   RoutingConfig  `json:"routing"`
 		Providers struct {
-			OpenAI    map[string]rawOpenAIProvider    `json:"openai"`
-			Anthropic map[string]rawAnthropicProvider `json:"anthropic"`
-			Gemini    map[string]rawGeminiProvider    `json:"gemini"`
+			OpenAI           map[string]rawOpenAIProvider           `json:"openai"`
+			Anthropic        map[string]rawAnthropicProvider        `json:"anthropic"`
+			Gemini           map[string]rawGeminiProvider           `json:"gemini"`
+			OpenAICompatible map[string]rawOpenAICompatibleProvider `json:"openai_compatible"`
 		} `json:"providers"`
 	}
 
@@ -289,6 +303,24 @@ func Load(path string) (Config, error) {
 		}
 	}
 
+	c.Providers.OpenAICompatible = map[string]OpenAICompatibleProvider{}
+	for name, p := range rc.Providers.OpenAICompatible {
+		var to time.Duration
+		if p.Timeout != "" {
+			d, err := time.ParseDuration(p.Timeout)
+			if err != nil {
+				return c, err
+			}
+			to = d
+		}
+
+		c.Providers.OpenAICompatible[name] = OpenAICompatibleProvider{
+			BaseURL: p.BaseURL,
+			APIKey:  resolveEnvIfPresent(p.APIKey), // optional
+			Timeout: to,
+		}
+	}
+
 	if c.Server.Addr == "" {
 		c.Server.Addr = ":8080"
 	}
@@ -335,6 +367,11 @@ func hasUsableProvider(c Config) bool {
 	}
 	for _, p := range c.Providers.Gemini {
 		if strings.TrimSpace(p.APIKey) != "" {
+			return true
+		}
+	}
+	for _, p := range c.Providers.OpenAICompatible {
+		if strings.TrimSpace(p.BaseURL) != "" {
 			return true
 		}
 	}
