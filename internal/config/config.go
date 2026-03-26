@@ -328,7 +328,7 @@ func Load(path string) (Config, error) {
 		return c, errors.New("routing.default_provider is required")
 	}
 	if !hasUsableProvider(c) {
-		return c, errors.New("at least one provider API key must be configured")
+		return c, errors.New("at least one usable provider must be configured")
 	}
 
 	return c, nil
@@ -355,21 +355,40 @@ func resolveEnvIfPresent(val string) string {
 }
 
 func hasUsableProvider(c Config) bool {
+	return hasUsableOpenAI(c) ||
+		hasUsableAnthropic(c) ||
+		hasUsableGemini(c) ||
+		hasUsableOpenAICompatible(c)
+}
+
+func hasUsableOpenAI(c Config) bool {
 	for _, p := range c.Providers.OpenAI {
-		if strings.TrimSpace(p.APIKey) != "" {
+		if strings.TrimSpace(p.BaseURL) != "" && strings.TrimSpace(p.APIKey) != "" {
 			return true
 		}
 	}
+	return false
+}
+
+func hasUsableAnthropic(c Config) bool {
 	for _, p := range c.Providers.Anthropic {
-		if strings.TrimSpace(p.APIKey) != "" {
+		if strings.TrimSpace(p.BaseURL) != "" && strings.TrimSpace(p.APIKey) != "" {
 			return true
 		}
 	}
+	return false
+}
+
+func hasUsableGemini(c Config) bool {
 	for _, p := range c.Providers.Gemini {
-		if strings.TrimSpace(p.APIKey) != "" {
+		if strings.TrimSpace(p.BaseURL) != "" && strings.TrimSpace(p.APIKey) != "" {
 			return true
 		}
 	}
+	return false
+}
+
+func hasUsableOpenAICompatible(c Config) bool {
 	for _, p := range c.Providers.OpenAICompatible {
 		if strings.TrimSpace(p.BaseURL) != "" {
 			return true
