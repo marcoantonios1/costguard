@@ -2,8 +2,10 @@ package gateway
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 
@@ -94,6 +96,16 @@ func (g *Gateway) callProviderWithFallback(r *http.Request, providerName string,
 
 	fallbackResp, fallbackErr := g.callSingleProvider(r, g.fallback, rewrittenBody)
 	if fallbackErr != nil {
+		if g.log != nil {
+			g.log.Error("fallback_failed", map[string]any{
+				"request_id":     server.RequestIDFromContext(r.Context()),
+				"primary":        providerName,
+				"fallback":       g.fallback,
+				"original_model": originalModel,
+				"fallback_model": fallbackModel,
+				"err":            fallbackErr.Error(),
+			})
+		}
 		return nil, g.fallback, fallbackModel, fallbackErr
 	}
 
@@ -154,12 +166,41 @@ func isRetryableProviderError(err error) bool {
 		return false
 	}
 
-	msg := err.Error()
+	// Structured network errors first.
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+
+	msg := strings.ToLower(err.Error())
 
 	switch {
 	case strings.Contains(msg, "provider not found"):
 		return true
 	case strings.Contains(msg, "upstream_5xx"):
+		return true
+	case strings.Contains(msg, "dial tcp"):
+		return true
+	case strings.Contains(msg, "lookup "):
+		return true
+	case strings.Contains(msg, "no such host"):
+		return true
+	case strings.Contains(msg, "connection refused"):
+		return true
+	case strings.Contains(msg, "i/o timeout"):
+		return true
+	case strings.Contains(msg, "context deadline exceeded"):
+		return true
+	case strings.Contains(msg, "timeout"):
+		return true
+	case strings.Contains(msg, "tls handshake timeout"):
+		return true
+	case strings.Contains(msg, "server misbehaving"):
 		return true
 	default:
 		return false

@@ -33,7 +33,7 @@
   },
 
   "routing": {
-    "default_provider": "openai_primary",
+    "default_provider": "anthropic_primary",
     "fallback_provider": "openai_backup",
     "model_to_provider": {
       "gpt-4o-mini": "openai_primary",
