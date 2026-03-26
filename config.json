@@ -96,12 +96,12 @@
     },
     "openai_compatible": {
       "local_ollama": {
-        "base_url": "http://host.docker.internal:11434/v1",
+        "base_url": "http://host.docker.internal:11434",
         "api_key": "",
         "timeout": "60s"
       },
       "local_vllm": {
-        "base_url": "http://host.docker.internal:8000/v1",
+        "base_url": "http://host.docker.internal:8000",
         "api_key": "",
         "timeout": "60s"
       }

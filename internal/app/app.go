@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -42,8 +43,21 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 	availableProviders := map[string]bool{}
 
 	for name, p := range cfg.Providers.OpenAI {
+		if p.BaseURL == "" {
+			log.Info("skip_provider_missing_base_url", map[string]any{
+				"name":          name,
+				"type":          "openai",
+				"auth_required": true,
+			})
+			continue
+		}
+
 		if p.APIKey == "" {
-			log.Info("skip_openai_provider_without_api_key", map[string]any{"name": name})
+			log.Info("skip_provider_missing_api_key", map[string]any{
+				"name":          name,
+				"type":          "openai",
+				"auth_required": true,
+			})
 			continue
 		}
 
@@ -56,17 +70,41 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 			Timeout: p.Timeout,
 		})
 		if err != nil {
-			log.Error("failed_to_create_openai_client", map[string]any{"name": name, "error": err})
+			log.Error("failed_to_create_openai_client", map[string]any{
+				"name":  name,
+				"type":  "openai",
+				"error": err,
+			})
 			return nil, err
 		}
 
 		reg.Register(name, adapter)
 		availableProviders[name] = true
+
+		log.Info("provider_enabled", map[string]any{
+			"name":          name,
+			"type":          "openai",
+			"auth_required": true,
+			"base_url":      p.BaseURL,
+		})
 	}
 
 	for name, p := range cfg.Providers.Anthropic {
+		if p.BaseURL == "" {
+			log.Info("skip_provider_missing_base_url", map[string]any{
+				"name":          name,
+				"type":          "anthropic",
+				"auth_required": true,
+			})
+			continue
+		}
+
 		if p.APIKey == "" {
-			log.Info("skip_anthropic_provider_without_api_key", map[string]any{"name": name})
+			log.Info("skip_provider_missing_api_key", map[string]any{
+				"name":          name,
+				"type":          "anthropic",
+				"auth_required": true,
+			})
 			continue
 		}
 
@@ -78,17 +116,41 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 			Timeout:          p.Timeout,
 		})
 		if err != nil {
-			log.Error("failed_to_create_anthropic_client", map[string]any{"name": name, "error": err})
+			log.Error("failed_to_create_anthropic_client", map[string]any{
+				"name":  name,
+				"type":  "anthropic",
+				"error": err,
+			})
 			return nil, err
 		}
 
 		reg.Register(name, adapter)
 		availableProviders[name] = true
+
+		log.Info("provider_enabled", map[string]any{
+			"name":          name,
+			"type":          "anthropic",
+			"auth_required": true,
+			"base_url":      p.BaseURL,
+		})
 	}
 
 	for name, p := range cfg.Providers.Gemini {
+		if p.BaseURL == "" {
+			log.Info("skip_provider_missing_base_url", map[string]any{
+				"name":          name,
+				"type":          "gemini",
+				"auth_required": true,
+			})
+			continue
+		}
+
 		if p.APIKey == "" {
-			log.Info("skip_gemini_provider_without_api_key", map[string]any{"name": name})
+			log.Info("skip_provider_missing_api_key", map[string]any{
+				"name":          name,
+				"type":          "gemini",
+				"auth_required": true,
+			})
 			continue
 		}
 
@@ -99,17 +161,32 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 			Timeout: p.Timeout,
 		})
 		if err != nil {
-			log.Error("failed_to_create_gemini_client", map[string]any{"name": name, "error": err})
+			log.Error("failed_to_create_gemini_client", map[string]any{
+				"name":  name,
+				"type":  "gemini",
+				"error": err,
+			})
 			return nil, err
 		}
 
 		reg.Register(name, adapter)
 		availableProviders[name] = true
+
+		log.Info("provider_enabled", map[string]any{
+			"name":          name,
+			"type":          "gemini",
+			"auth_required": true,
+			"base_url":      p.BaseURL,
+		})
 	}
 
 	for name, p := range cfg.Providers.OpenAICompatible {
 		if p.BaseURL == "" {
-			log.Info("skip_openai_compatible_provider_without_base_url", map[string]any{"name": name})
+			log.Info("skip_provider_missing_base_url", map[string]any{
+				"name":          name,
+				"type":          "openai_compatible",
+				"auth_required": false,
+			})
 			continue
 		}
 
@@ -122,6 +199,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		if err != nil {
 			log.Error("failed_to_create_openai_compatible_client", map[string]any{
 				"name":  name,
+				"type":  "openai_compatible",
 				"error": err,
 			})
 			return nil, err
@@ -130,9 +208,12 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		reg.Register(name, adapter)
 		availableProviders[name] = true
 
-		log.Info("registered_openai_compatible_provider", map[string]any{
-			"name":     name,
-			"base_url": p.BaseURL,
+		log.Info("provider_enabled", map[string]any{
+			"name":          name,
+			"type":          "openai_compatible",
+			"auth_required": false,
+			"base_url":      p.BaseURL,
+			"has_api_key":   strings.TrimSpace(p.APIKey) != "",
 		})
 	}
 
