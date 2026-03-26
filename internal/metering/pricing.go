@@ -11,6 +11,16 @@ var Prices = map[string]map[string]Price{
 	// OpenAI
 	// --------------------
 	"openai": {
+		"gpt-5.4": {
+			InputPer1M:       2.50,
+			CachedInputPer1M: 0.25,
+			OutputPer1M:      15.00,
+		},
+		"gpt-5.4-mini": {
+			InputPer1M:       0.75,
+			CachedInputPer1M: 0.075,
+			OutputPer1M:      4.50,
+		},
 		"gpt-5": {
 			InputPer1M:       1.25,
 			CachedInputPer1M: 0.125,
@@ -72,6 +82,10 @@ var Prices = map[string]map[string]Price{
 			OutputPer1M: 5.00,
 		},
 		"claude-sonnet-4-5": {
+			InputPer1M:  3.00,
+			OutputPer1M: 15.00,
+		},
+		"claude-sonnet-4-6": {
 			InputPer1M:  3.00,
 			OutputPer1M: 15.00,
 		},
