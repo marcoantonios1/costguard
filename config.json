@@ -33,16 +33,23 @@
   },
 
   "routing": {
-    "default_provider": "openai_primary",
+    "default_provider": "anthropic_primary",
     "fallback_provider": "openai_backup",
     "model_to_provider": {
       "gpt-4o-mini": "openai_primary",
-      "claude-3-5-sonnet-latest": "anthropic_primary"
+      "claude-3-5-sonnet-latest": "anthropic_primary",
+      "gemini-2.5-flash": "google_primary"
     },
     "model_compatibility": {
       "claude-3-5-sonnet-latest": {
         "openai_backup": "gpt-4o-mini",
-        "openai_primary": "gpt-4o-mini"
+        "openai_primary": "gpt-4o-mini",
+        "google_primary": "gemini-2.5-flash"
+      },
+      "gemini-2.5-flash": {
+        "openai_backup": "gpt-4o-mini",
+        "openai_primary": "gpt-4o-mini",
+        "anthropic_primary": "claude-3-5-sonnet-latest"
       }
     }
   },
@@ -77,6 +84,13 @@
         "base_url": "https://api.anthropic.com",
         "api_key": "env:ANTHROPIC_API_KEY",
         "anthropic_version": "2023-06-01",
+        "timeout": "60s"
+      }
+    },
+    "gemini": {
+      "google_primary": {
+        "base_url": "https://generativelanguage.googleapis.com",
+        "api_key": "env:GEMINI_API_KEY",
         "timeout": "60s"
       }
     }

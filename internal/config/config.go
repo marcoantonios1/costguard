@@ -1,4 +1,3 @@
-// internal/config/config.go
 package config
 
 import (
@@ -28,17 +27,17 @@ type DatabaseConfig struct {
 }
 
 type ServerConfig struct {
-	Addr string `json:"addr"` // e.g. ":8080"
+	Addr string `json:"addr"`
 }
 
 type LoggingConfig struct {
-	Level string `json:"level"` // "debug"|"info"|"warn"|"error"
+	Level string `json:"level"`
 	JSON  bool   `json:"json"`
 }
 
 type CacheConfig struct {
 	Enabled bool          `json:"enabled"`
-	TTL     time.Duration `json:"ttl"` // parsed from string in Load()
+	TTL     time.Duration `json:"ttl"`
 	MaxKeys int           `json:"max_keys"`
 }
 
@@ -52,6 +51,7 @@ type RoutingConfig struct {
 type ProvidersConfig struct {
 	OpenAI    map[string]OpenAIProvider    `json:"openai"`
 	Anthropic map[string]AnthropicProvider `json:"anthropic"`
+	Gemini    map[string]GeminiProvider    `json:"gemini"`
 }
 
 type BudgetConfig struct {
@@ -100,6 +100,12 @@ type AnthropicProvider struct {
 	Timeout          time.Duration `json:"timeout"`
 }
 
+type GeminiProvider struct {
+	BaseURL string        `json:"base_url"`
+	APIKey  string        `json:"api_key"`
+	Timeout time.Duration `json:"timeout"`
+}
+
 func Load(path string) (Config, error) {
 	var c Config
 
@@ -129,6 +135,12 @@ func Load(path string) (Config, error) {
 		Timeout          string `json:"timeout"`
 	}
 
+	type rawGeminiProvider struct {
+		BaseURL string `json:"base_url"`
+		APIKey  string `json:"api_key"`
+		Timeout string `json:"timeout"`
+	}
+
 	type rawReports struct {
 		MonthlyEnabled bool   `json:"monthly_enabled"`
 		CheckInterval  string `json:"check_interval"`
@@ -148,6 +160,7 @@ func Load(path string) (Config, error) {
 		Providers struct {
 			OpenAI    map[string]rawOpenAIProvider    `json:"openai"`
 			Anthropic map[string]rawAnthropicProvider `json:"anthropic"`
+			Gemini    map[string]rawGeminiProvider    `json:"gemini"`
 		} `json:"providers"`
 	}
 
@@ -258,6 +271,24 @@ func Load(path string) (Config, error) {
 		}
 	}
 
+	c.Providers.Gemini = map[string]GeminiProvider{}
+	for name, p := range rc.Providers.Gemini {
+		var to time.Duration
+		if p.Timeout != "" {
+			d, err := time.ParseDuration(p.Timeout)
+			if err != nil {
+				return c, err
+			}
+			to = d
+		}
+
+		c.Providers.Gemini[name] = GeminiProvider{
+			BaseURL: p.BaseURL,
+			APIKey:  resolveEnvIfPresent(p.APIKey),
+			Timeout: to,
+		}
+	}
+
 	if c.Server.Addr == "" {
 		c.Server.Addr = ":8080"
 	}
@@ -298,6 +329,11 @@ func hasUsableProvider(c Config) bool {
 		}
 	}
 	for _, p := range c.Providers.Anthropic {
+		if strings.TrimSpace(p.APIKey) != "" {
+			return true
+		}
+	}
+	for _, p := range c.Providers.Gemini {
 		if strings.TrimSpace(p.APIKey) != "" {
 			return true
 		}
