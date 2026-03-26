@@ -21,6 +21,7 @@ import (
 	anthropic_provider "github.com/marcoantonios1/costguard/internal/providers/anthropic"
 	gemini_provider "github.com/marcoantonios1/costguard/internal/providers/gemini"
 	openai_provider "github.com/marcoantonios1/costguard/internal/providers/openai"
+	openaicompat_provider "github.com/marcoantonios1/costguard/internal/providers/openaicompat"
 	"github.com/marcoantonios1/costguard/internal/report"
 	"github.com/marcoantonios1/costguard/internal/router"
 	"github.com/marcoantonios1/costguard/internal/server"
@@ -104,6 +105,35 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 
 		reg.Register(name, adapter)
 		availableProviders[name] = true
+	}
+
+	for name, p := range cfg.Providers.OpenAICompatible {
+		if p.BaseURL == "" {
+			log.Info("skip_openai_compatible_provider_without_base_url", map[string]any{"name": name})
+			continue
+		}
+
+		adapter, err := openaicompat_provider.NewClient(openaicompat_provider.ClientConfig{
+			Name:    name,
+			BaseURL: p.BaseURL,
+			APIKey:  p.APIKey,
+			Timeout: p.Timeout,
+		})
+		if err != nil {
+			log.Error("failed_to_create_openai_compatible_client", map[string]any{
+				"name":  name,
+				"error": err,
+			})
+			return nil, err
+		}
+
+		reg.Register(name, adapter)
+		availableProviders[name] = true
+
+		log.Info("registered_openai_compatible_provider", map[string]any{
+			"name":     name,
+			"base_url": p.BaseURL,
+		})
 	}
 
 	rt := router.New(router.Config{
