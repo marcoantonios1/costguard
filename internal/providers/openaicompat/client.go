@@ -1,4 +1,4 @@
-package openai
+package openaicompat
 
 import (
 	"context"
@@ -16,28 +16,24 @@ type ClientConfig struct {
 	Name    string
 	BaseURL string
 	APIKey  string
-	Org     string
-	Project string
 	Timeout time.Duration
 }
 
 type Client struct {
-	name    string
-	base    *url.URL
-	apiKey  string
-	org     string
-	project string
-	hc      *http.Client
+	name   string
+	base   *url.URL
+	apiKey string
+	hc     *http.Client
 }
 
 func NewClient(cfg ClientConfig) (*Client, error) {
 	if cfg.Name == "" {
-		return nil, fmt.Errorf("openai client name is required")
+		return nil, fmt.Errorf("openai-compatible client name is required")
 	}
 
 	base := cfg.BaseURL
 	if base == "" {
-		base = "https://api.openai.com"
+		return nil, fmt.Errorf("openai-compatible base_url is required")
 	}
 
 	u, err := url.Parse(base)
@@ -51,12 +47,10 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	}
 
 	return &Client{
-		name:    cfg.Name,
-		base:    u,
-		apiKey:  cfg.APIKey,
-		org:     cfg.Org,
-		project: cfg.Project,
-		hc:      &http.Client{Timeout: to},
+		name:   cfg.Name,
+		base:   u,
+		apiKey: cfg.APIKey,
+		hc:     &http.Client{Timeout: to},
 	}, nil
 }
 
@@ -85,12 +79,6 @@ func (a *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 
 	if upstreamReq.Header.Get("Authorization") == "" && strings.TrimSpace(a.apiKey) != "" {
 		upstreamReq.Header.Set("Authorization", "Bearer "+a.apiKey)
-	}
-	if upstreamReq.Header.Get("OpenAI-Organization") == "" && strings.TrimSpace(a.org) != "" {
-		upstreamReq.Header.Set("OpenAI-Organization", a.org)
-	}
-	if upstreamReq.Header.Get("OpenAI-Project") == "" && strings.TrimSpace(a.project) != "" {
-		upstreamReq.Header.Set("OpenAI-Project", a.project)
 	}
 
 	return a.hc.Do(upstreamReq)
