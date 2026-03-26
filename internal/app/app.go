@@ -19,6 +19,7 @@ import (
 	"github.com/marcoantonios1/costguard/internal/notify"
 	"github.com/marcoantonios1/costguard/internal/providers"
 	anthropic_provider "github.com/marcoantonios1/costguard/internal/providers/anthropic"
+	gemini_provider "github.com/marcoantonios1/costguard/internal/providers/gemini"
 	openai_provider "github.com/marcoantonios1/costguard/internal/providers/openai"
 	"github.com/marcoantonios1/costguard/internal/report"
 	"github.com/marcoantonios1/costguard/internal/router"
@@ -36,16 +37,15 @@ type App struct {
 }
 
 func New(cfg config.Config, log *logging.Log) (*App, error) {
-	// Provider registry
 	reg := providers.NewRegistry()
 	availableProviders := map[string]bool{}
 
-	// Register OpenAI provider instances from config
 	for name, p := range cfg.Providers.OpenAI {
 		if p.APIKey == "" {
 			log.Info("skip_openai_provider_without_api_key", map[string]any{"name": name})
 			continue
 		}
+
 		adapter, err := openai_provider.NewClient(openai_provider.ClientConfig{
 			Name:    name,
 			BaseURL: p.BaseURL,
@@ -58,11 +58,11 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 			log.Error("failed_to_create_openai_client", map[string]any{"name": name, "error": err})
 			return nil, err
 		}
+
 		reg.Register(name, adapter)
 		availableProviders[name] = true
 	}
 
-	// Register Anthropic provider instances from config
 	for name, p := range cfg.Providers.Anthropic {
 		if p.APIKey == "" {
 			log.Info("skip_anthropic_provider_without_api_key", map[string]any{"name": name})
@@ -80,17 +80,38 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 			log.Error("failed_to_create_anthropic_client", map[string]any{"name": name, "error": err})
 			return nil, err
 		}
+
 		reg.Register(name, adapter)
 		availableProviders[name] = true
 	}
 
-	// Router
+	for name, p := range cfg.Providers.Gemini {
+		if p.APIKey == "" {
+			log.Info("skip_gemini_provider_without_api_key", map[string]any{"name": name})
+			continue
+		}
+
+		adapter, err := gemini_provider.NewClient(gemini_provider.ClientConfig{
+			Name:    name,
+			BaseURL: p.BaseURL,
+			APIKey:  p.APIKey,
+			Timeout: p.Timeout,
+		})
+		if err != nil {
+			log.Error("failed_to_create_gemini_client", map[string]any{"name": name, "error": err})
+			return nil, err
+		}
+
+		reg.Register(name, adapter)
+		availableProviders[name] = true
+	}
+
 	rt := router.New(router.Config{
-	DefaultProvider:    cfg.Routing.DefaultProvider,
-	ModelToProvider:    cfg.Routing.ModelToProvider,
-	AvailableProviders: availableProviders,
-	Log:                log,
-})
+		DefaultProvider:    cfg.Routing.DefaultProvider,
+		ModelToProvider:    cfg.Routing.ModelToProvider,
+		AvailableProviders: availableProviders,
+		Log:                log,
+	})
 
 	var c cache.Cache
 	if cfg.Cache.Enabled {
@@ -102,8 +123,8 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	alertStore := alert.NewPostgresStore(pool)
 
+	alertStore := alert.NewPostgresStore(pool)
 	usageStore := usage.NewPostgresStore(pool)
 
 	budgetSvc := budget.NewService(usageStore, budget.Config{
@@ -148,14 +169,12 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		return nil, err
 	}
 
-	// HTTP handlers (Phase A: only healthz now; OpenAI proxy added later in step 5/6)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", server.HealthzHandler())
 
 	openai_http.Register(mux, openai_http.Deps{Gateway: gw})
 
 	adminMux := http.NewServeMux()
-
 	admin.Register(adminMux, admin.Deps{
 		UsageStore: usageStore,
 		Reports:    reportEmailSvc,
@@ -164,10 +183,8 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 	})
 
 	protectedAdmin := server.AdminAuth(cfg.Admin.APIKey)(adminMux)
-
 	mux.Handle("/admin/", http.StripPrefix("/admin", protectedAdmin))
 
-	// wrap middleware
 	handler := server.LoggingMiddleware(log, mux)
 
 	srv := server.NewServer(server.Deps{
