@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 func (g *Gateway) isCacheableRequest(r *http.Request, body []byte) bool {
@@ -25,9 +26,33 @@ func (g *Gateway) isCacheableRequest(r *http.Request, body []byte) bool {
 	return true
 }
 
-func buildCacheKey(r *http.Request, body []byte) string {
-	sum := sha256.Sum256([]byte(r.Method + "\n" + r.URL.Path + "\n" + string(body)))
-	return hex.EncodeToString(sum[:])
+func buildCacheKey(
+	r *http.Request,
+	body []byte,
+	requestedProvider string,
+	requestedMode string,
+	selectedProvider string,
+	effectiveModel string,
+) string {
+	h := sha256.New()
+
+	writeKeyPart(h, r.Method)
+	writeKeyPart(h, r.URL.Path)
+	writeKeyPart(h, r.URL.RawQuery)
+
+	writeKeyPart(h, strings.TrimSpace(requestedProvider))
+	writeKeyPart(h, strings.TrimSpace(strings.ToLower(requestedMode)))
+	writeKeyPart(h, strings.TrimSpace(selectedProvider))
+	writeKeyPart(h, strings.TrimSpace(effectiveModel))
+
+	_, _ = h.Write(body)
+
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func writeKeyPart(h interface{ Write([]byte) (int, error) }, value string) {
+	_, _ = h.Write([]byte(value))
+	_, _ = h.Write([]byte{0})
 }
 
 func shortKey(key string) string {

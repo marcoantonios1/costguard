@@ -164,11 +164,23 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 		}
 	}
 
-	cacheable := g.isCacheableRequest(r, effectiveBodyBytes)
+	if g.log != nil {
+		g.log.Info("routing_decision", map[string]any{
+			"request_id":         server.RequestIDFromContext(r.Context()),
+			"requested_model":    model,
+			"requested_provider": requestedProvider,
+			"requested_mode":     hintedMode,
+			"selected_provider":  providerName,
+			"effective_model":    effectiveModel,
+			"path":               r.URL.Path,
+		})
+	}
+
+		cacheable := g.isCacheableRequest(r, effectiveBodyBytes)
 	cacheKey := ""
 
 	if cacheable && g.cache != nil && g.cacheTTL > 0 {
-		cacheKey = buildCacheKey(r, effectiveBodyBytes)
+		cacheKey = buildCacheKey(r, effectiveBodyBytes, requestedProviderHint(r), hintedMode, providerName, effectiveModel)
 
 		if entry, ok := g.cache.Get(cacheKey); ok {
 			if g.log != nil {
@@ -181,6 +193,20 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 			}
 
 			g.meterResponse(r, providerName, effectiveModel, entry.Body, true, http.StatusOK)
+
+			if g.log != nil {
+				g.log.Info("routing_result", map[string]any{
+					"request_id":         server.RequestIDFromContext(r.Context()),
+					"requested_model":    model,
+					"requested_provider": requestedProvider,
+					"requested_mode":     hintedMode,
+					"final_provider":     providerName,
+					"final_model":        effectiveModel,
+					"cache_hit":          true,
+					"path":               r.URL.Path,
+				})
+			}
+
 			return responseFromCacheEntry(r, entry), nil
 		}
 
@@ -283,6 +309,19 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 			"requested_mode":     hintedMode,
 			"original_model":     effectiveModel,
 			"final_model":        finalModel,
+			"path":               r.URL.Path,
+		})
+	}
+
+	if g.log != nil {
+		g.log.Info("routing_result", map[string]any{
+			"request_id":         server.RequestIDFromContext(r.Context()),
+			"requested_model":    model,
+			"requested_provider": requestedProvider,
+			"requested_mode":     hintedMode,
+			"final_provider":     actualProvider,
+			"final_model":        finalModel,
+			"cache_hit":          false,
 			"path":               r.URL.Path,
 		})
 	}
