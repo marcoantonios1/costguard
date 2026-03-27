@@ -20,15 +20,53 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 	model := extractModel(bodyBytes)
-	providerName := g.router.PickProvider(model)
 
-	if g.log != nil {
-		g.log.Info("route_selected", map[string]any{
-			"request_id": server.RequestIDFromContext(r.Context()),
-			"model":      model,
-			"provider":   providerName,
-			"path":       r.URL.Path,
-		})
+	hintedProvider := requestedProviderHint(r)
+	requestedProvider := ""
+	providerName := ""
+
+	if hintedProvider != "" {
+		if _, err := g.reg.Get(hintedProvider); err != nil {
+			if g.log != nil {
+				g.log.Info("provider_hint_rejected", map[string]any{
+					"request_id": server.RequestIDFromContext(r.Context()),
+					"provider":   hintedProvider,
+					"path":       r.URL.Path,
+					"model":      model,
+					"reason":     "unknown_provider",
+				})
+			}
+
+			return newJSONErrorResponse(
+				r,
+				http.StatusBadRequest,
+				"unknown provider hint: "+hintedProvider,
+			), nil
+		}
+
+		requestedProvider = hintedProvider
+		providerName = hintedProvider
+
+		if g.log != nil {
+			g.log.Info("provider_hint_accepted", map[string]any{
+				"request_id": server.RequestIDFromContext(r.Context()),
+				"provider":   hintedProvider,
+				"path":       r.URL.Path,
+				"model":      model,
+			})
+		}
+	} else {
+		providerName = g.router.PickProvider(model)
+		requestedProvider = providerName
+
+		if g.log != nil {
+			g.log.Info("route_selected", map[string]any{
+				"request_id": server.RequestIDFromContext(r.Context()),
+				"model":      model,
+				"provider":   providerName,
+				"path":       r.URL.Path,
+			})
+		}
 	}
 
 	cacheable := g.isCacheableRequest(r, bodyBytes)
@@ -128,15 +166,27 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 
 	if g.log != nil {
 		g.log.Info("provider_call", map[string]any{
-			"request_id": server.RequestIDFromContext(r.Context()),
-			"provider":   providerName,
-			"path":       r.URL.Path,
+			"request_id":         server.RequestIDFromContext(r.Context()),
+			"provider":           providerName,
+			"requested_provider": requestedProvider,
+			"path":               r.URL.Path,
 		})
 	}
 
 	resp, actualProvider, finalModel, err := g.callProviderWithFallback(r, providerName, bodyBytes, model)
 	if err != nil {
 		return nil, err
+	}
+
+	if g.log != nil && actualProvider != requestedProvider {
+		g.log.Info("provider_resolution_changed", map[string]any{
+			"request_id":         server.RequestIDFromContext(r.Context()),
+			"requested_provider": requestedProvider,
+			"actual_provider":    actualProvider,
+			"original_model":     model,
+			"final_model":        finalModel,
+			"path":               r.URL.Path,
+		})
 	}
 
 	return g.maybeStoreAndReturn(r, resp, actualProvider, finalModel, cacheable, cacheKey)
