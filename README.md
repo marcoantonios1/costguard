@@ -31,7 +31,8 @@ Costguard solves these problems by introducing a **thin gateway layer** that man
 Client → Costguard → Provider (OpenAI / Anthropic / ...)
 
 Costguard acts as a proxy that:
-- Selects the best provider
+
+- Selects a provider based on configuration and hints
 - Tracks usage and cost
 - Applies caching and budgets
 - Falls back on failures
@@ -49,15 +50,31 @@ go run ./cmd/api -config ./config.json
 Send a request using the OpenAI API format:
 
 ```bash
-curl http://localhost:8080/v1/chat/completions \
+curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "X-Costguard-Provider: local_ollama" \
   -H "X-Costguard-Team: backend" \
   -H "X-Costguard-Project: chatbot" \
   -H "X-Costguard-User: marco" \
   -d '{
-    "model": "gpt-4o-mini",
+    "model": "llama3.2",
     "messages": [
-      {"role":"user","content":"Say hello"}
+      {"role": "user", "content": "Say hello in two sentence"}
+    ]
+  }'
+```
+
+```bash
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-Costguard-Mode: private" \
+  -H "X-Costguard-Team: backend" \
+  -H "X-Costguard-Project: chatbot" \
+  -H "X-Costguard-User: marco" \
+  -d '{
+    "model": "llama3.2",
+    "messages": [
+      {"role": "user", "content": "Say hello in two sentence"}
     ]
   }'
 ```
@@ -79,7 +96,6 @@ No other changes are required.
 ```bash
 docker compose up --build
 ```
-
 
 # Project Structure
 
@@ -111,33 +127,48 @@ costguard/
 ## ✨ Features
 
 ### 🔀 Multi-Provider Routing
-Route requests to different providers based on model or config.
+
+- Route requests to different providers based on model or config.
 
 ### 🔁 Fallback System
-Automatically retry with a fallback provider if the primary fails.
+
+- Automatically retry with a fallback provider if the primary fails.
 
 ### 🔄 Model Compatibility Mapping
-Map models across providers when fallback occurs:
+
+- Map models across providers when routing or fallback occurs.
 
 Example:
 claude-3-5-sonnet-latest → gpt-4o-mini
 
+- If a model is not compatible with the selected provider and no mapping is defined, the request may fail.
+
 ### 🚫 Provider Availability Awareness
-Skip providers that are not configured or unavailable.
+
+- Skip providers that are not configured or unavailable.
 
 ### 💾 Caching
-In-memory cache to reduce cost and latency.
+
+- In-memory cache to reduce cost and latency.
+- Cache keys include routing context (provider, mode, model) to prevent incorrect reuse across providers.
 
 ### 💰 Cost Tracking
-Track token usage and estimated cost per request.
+
+- Track token usage and estimated cost per request.
 
 ### 📊 Budget Enforcement
+
 - Global monthly budget
 - Per-team and per-project limits
 
 ### 📧 Reporting & Alerts
+
 - Scheduled reports
 - Email notifications
+
+### 🎯 Request-Level Routing Control
+
+- Override provider or influence routing per request using headers.
 
 ---
 
@@ -167,6 +198,12 @@ Example:
     "fallback_provider": "openai_backup",
     "model_to_provider": {
       "gpt-4o-mini": "openai_primary"
+    },
+    "mode_to_provider": {
+      "cheap": "google_primary",
+      "balanced": "openai_primary",
+      "best": "anthropic_primary",
+      "private": "local_ollama"
     }
   },
 
