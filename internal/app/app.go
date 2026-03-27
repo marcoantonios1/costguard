@@ -40,10 +40,28 @@ type App struct {
 
 func New(cfg config.Config, log *logging.Log) (*App, error) {
 	reg := providers.NewRegistry()
+	catalog := providers.NewCatalog()
 	availableProviders := map[string]bool{}
 
 	for name, p := range cfg.Providers.OpenAI {
 		if p.BaseURL == "" {
+			catalog.Set(name, providers.RuntimeMetadata{
+				Name:               name,
+				Type:               "openai",
+				BaseURL:            p.BaseURL,
+				AuthRequired:       true,
+				HasAPIKey:          strings.TrimSpace(p.APIKey) != "",
+				Kind:               p.Metadata.Kind,
+				SupportsTools:      p.Metadata.SupportsTools,
+				SupportsStreaming:  p.Metadata.SupportsStreaming,
+				SupportsVision:     p.Metadata.SupportsVision,
+				SupportsEmbeddings: p.Metadata.SupportsEmbeddings,
+				Priority:           p.Metadata.Priority,
+				Tags:               append([]string(nil), p.Metadata.Tags...),
+				Enabled:            false,
+				SkipReason:         "missing_base_url",
+			})
+
 			log.Info("skip_provider_missing_base_url", map[string]any{
 				"name":          name,
 				"type":          "openai",
@@ -53,6 +71,23 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		}
 
 		if p.APIKey == "" {
+			catalog.Set(name, providers.RuntimeMetadata{
+				Name:               name,
+				Type:               "openai",
+				BaseURL:            p.BaseURL,
+				AuthRequired:       true,
+				HasAPIKey:          false,
+				Kind:               p.Metadata.Kind,
+				SupportsTools:      p.Metadata.SupportsTools,
+				SupportsStreaming:  p.Metadata.SupportsStreaming,
+				SupportsVision:     p.Metadata.SupportsVision,
+				SupportsEmbeddings: p.Metadata.SupportsEmbeddings,
+				Priority:           p.Metadata.Priority,
+				Tags:               append([]string(nil), p.Metadata.Tags...),
+				Enabled:            false,
+				SkipReason:         "missing_api_key",
+			})
+
 			log.Info("skip_provider_missing_api_key", map[string]any{
 				"name":          name,
 				"type":          "openai",
@@ -81,16 +116,55 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		reg.Register(name, adapter)
 		availableProviders[name] = true
 
+		catalog.Set(name, providers.RuntimeMetadata{
+			Name:               name,
+			Type:               "openai",
+			BaseURL:            p.BaseURL,
+			AuthRequired:       true,
+			HasAPIKey:          true,
+			Kind:               p.Metadata.Kind,
+			SupportsTools:      p.Metadata.SupportsTools,
+			SupportsStreaming:  p.Metadata.SupportsStreaming,
+			SupportsVision:     p.Metadata.SupportsVision,
+			SupportsEmbeddings: p.Metadata.SupportsEmbeddings,
+			Priority:           p.Metadata.Priority,
+			Tags:               append([]string(nil), p.Metadata.Tags...),
+			Enabled:            true,
+		})
+
 		log.Info("provider_enabled", map[string]any{
-			"name":          name,
-			"type":          "openai",
-			"auth_required": true,
-			"base_url":      p.BaseURL,
+			"name":                name,
+			"type":                "openai",
+			"auth_required":       true,
+			"base_url":            p.BaseURL,
+			"kind":                p.Metadata.Kind,
+			"supports_tools":      p.Metadata.SupportsTools,
+			"supports_streaming":  p.Metadata.SupportsStreaming,
+			"supports_vision":     p.Metadata.SupportsVision,
+			"supports_embeddings": p.Metadata.SupportsEmbeddings,
+			"priority":            p.Metadata.Priority,
+			"tags":                p.Metadata.Tags,
 		})
 	}
 
 	for name, p := range cfg.Providers.Anthropic {
 		if p.BaseURL == "" {
+			catalog.Set(name, providers.RuntimeMetadata{
+				Name:               name,
+				Type:               "anthropic",
+				BaseURL:            p.BaseURL,
+				AuthRequired:       true,
+				HasAPIKey:          strings.TrimSpace(p.APIKey) != "",
+				Kind:               p.Metadata.Kind,
+				SupportsTools:      p.Metadata.SupportsTools,
+				SupportsStreaming:  p.Metadata.SupportsStreaming,
+				SupportsVision:     p.Metadata.SupportsVision,
+				SupportsEmbeddings: p.Metadata.SupportsEmbeddings,
+				Priority:           p.Metadata.Priority,
+				Tags:               append([]string(nil), p.Metadata.Tags...),
+				Enabled:            false,
+				SkipReason:         "missing_base_url",
+			})
 			log.Info("skip_provider_missing_base_url", map[string]any{
 				"name":          name,
 				"type":          "anthropic",
@@ -100,6 +174,22 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		}
 
 		if p.APIKey == "" {
+			catalog.Set(name, providers.RuntimeMetadata{
+				Name:               name,
+				Type:               "anthropic",
+				BaseURL:            p.BaseURL,
+				AuthRequired:       true,
+				HasAPIKey:          false,
+				Kind:               p.Metadata.Kind,
+				SupportsTools:      p.Metadata.SupportsTools,
+				SupportsStreaming:  p.Metadata.SupportsStreaming,
+				SupportsVision:     p.Metadata.SupportsVision,
+				SupportsEmbeddings: p.Metadata.SupportsEmbeddings,
+				Priority:           p.Metadata.Priority,
+				Tags:               append([]string(nil), p.Metadata.Tags...),
+				Enabled:            false,
+				SkipReason:         "missing_api_key",
+			})
 			log.Info("skip_provider_missing_api_key", map[string]any{
 				"name":          name,
 				"type":          "anthropic",
@@ -127,16 +217,55 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		reg.Register(name, adapter)
 		availableProviders[name] = true
 
+		catalog.Set(name, providers.RuntimeMetadata{
+			Name:               name,
+			Type:               "anthropic",
+			BaseURL:            p.BaseURL,
+			AuthRequired:       true,
+			HasAPIKey:          true,
+			Kind:               p.Metadata.Kind,
+			SupportsTools:      p.Metadata.SupportsTools,
+			SupportsStreaming:  p.Metadata.SupportsStreaming,
+			SupportsVision:     p.Metadata.SupportsVision,
+			SupportsEmbeddings: p.Metadata.SupportsEmbeddings,
+			Priority:           p.Metadata.Priority,
+			Tags:               append([]string(nil), p.Metadata.Tags...),
+			Enabled:            true,
+		})
+
 		log.Info("provider_enabled", map[string]any{
-			"name":          name,
-			"type":          "anthropic",
-			"auth_required": true,
-			"base_url":      p.BaseURL,
+			"name":                name,
+			"type":                "anthropic",
+			"auth_required":       true,
+			"base_url":            p.BaseURL,
+			"kind":                p.Metadata.Kind,
+			"supports_tools":      p.Metadata.SupportsTools,
+			"supports_streaming":  p.Metadata.SupportsStreaming,
+			"supports_vision":     p.Metadata.SupportsVision,
+			"supports_embeddings": p.Metadata.SupportsEmbeddings,
+			"priority":            p.Metadata.Priority,
+			"tags":                p.Metadata.Tags,
 		})
 	}
 
 	for name, p := range cfg.Providers.Gemini {
 		if p.BaseURL == "" {
+			catalog.Set(name, providers.RuntimeMetadata{
+				Name:               name,
+				Type:               "gemini",
+				BaseURL:            p.BaseURL,
+				AuthRequired:       true,
+				HasAPIKey:          false,
+				Kind:               p.Metadata.Kind,
+				SupportsTools:      p.Metadata.SupportsTools,
+				SupportsStreaming:  p.Metadata.SupportsStreaming,
+				SupportsVision:     p.Metadata.SupportsVision,
+				SupportsEmbeddings: p.Metadata.SupportsEmbeddings,
+				Priority:           p.Metadata.Priority,
+				Tags:               append([]string(nil), p.Metadata.Tags...),
+				Enabled:            false,
+				SkipReason:         "missing_base_url",
+			})
 			log.Info("skip_provider_missing_base_url", map[string]any{
 				"name":          name,
 				"type":          "gemini",
@@ -146,6 +275,22 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		}
 
 		if p.APIKey == "" {
+			catalog.Set(name, providers.RuntimeMetadata{
+				Name:               name,
+				Type:               "gemini",
+				BaseURL:            p.BaseURL,
+				AuthRequired:       true,
+				HasAPIKey:          false,
+				Kind:               p.Metadata.Kind,
+				SupportsTools:      p.Metadata.SupportsTools,
+				SupportsStreaming:  p.Metadata.SupportsStreaming,
+				SupportsVision:     p.Metadata.SupportsVision,
+				SupportsEmbeddings: p.Metadata.SupportsEmbeddings,
+				Priority:           p.Metadata.Priority,
+				Tags:               append([]string(nil), p.Metadata.Tags...),
+				Enabled:            false,
+				SkipReason:         "missing_api_key",
+			})
 			log.Info("skip_provider_missing_api_key", map[string]any{
 				"name":          name,
 				"type":          "gemini",
@@ -172,16 +317,54 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		reg.Register(name, adapter)
 		availableProviders[name] = true
 
+		catalog.Set(name, providers.RuntimeMetadata{
+			Name:               name,
+			Type:               "gemini",
+			BaseURL:            p.BaseURL,
+			AuthRequired:       true,
+			HasAPIKey:          true,
+			Kind:               p.Metadata.Kind,
+			SupportsTools:      p.Metadata.SupportsTools,
+			SupportsStreaming:  p.Metadata.SupportsStreaming,
+			SupportsVision:     p.Metadata.SupportsVision,
+			SupportsEmbeddings: p.Metadata.SupportsEmbeddings,
+			Priority:           p.Metadata.Priority,
+			Tags:               append([]string(nil), p.Metadata.Tags...),
+			Enabled:            true,
+		})
 		log.Info("provider_enabled", map[string]any{
-			"name":          name,
-			"type":          "gemini",
-			"auth_required": true,
-			"base_url":      p.BaseURL,
+			"name":                name,
+			"type":                "gemini",
+			"auth_required":       true,
+			"base_url":            p.BaseURL,
+			"kind":                p.Metadata.Kind,
+			"supports_tools":      p.Metadata.SupportsTools,
+			"supports_streaming":  p.Metadata.SupportsStreaming,
+			"supports_vision":     p.Metadata.SupportsVision,
+			"supports_embeddings": p.Metadata.SupportsEmbeddings,
+			"priority":            p.Metadata.Priority,
+			"tags":                p.Metadata.Tags,
 		})
 	}
 
 	for name, p := range cfg.Providers.OpenAICompatible {
 		if p.BaseURL == "" {
+			catalog.Set(name, providers.RuntimeMetadata{
+				Name:               name,
+				Type:               "openai_compatible",
+				BaseURL:            p.BaseURL,
+				AuthRequired:       false,
+				HasAPIKey:          strings.TrimSpace(p.APIKey) != "",
+				Kind:               p.Metadata.Kind,
+				SupportsTools:      p.Metadata.SupportsTools,
+				SupportsStreaming:  p.Metadata.SupportsStreaming,
+				SupportsVision:     p.Metadata.SupportsVision,
+				SupportsEmbeddings: p.Metadata.SupportsEmbeddings,
+				Priority:           p.Metadata.Priority,
+				Tags:               append([]string(nil), p.Metadata.Tags...),
+				Enabled:            false,
+				SkipReason:         "missing_base_url",
+			})
 			log.Info("skip_provider_missing_base_url", map[string]any{
 				"name":          name,
 				"type":          "openai_compatible",
@@ -208,12 +391,34 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		reg.Register(name, adapter)
 		availableProviders[name] = true
 
+		catalog.Set(name, providers.RuntimeMetadata{
+			Name:               name,
+			Type:               "openai_compatible",
+			BaseURL:            p.BaseURL,
+			AuthRequired:       false,
+			HasAPIKey:          strings.TrimSpace(p.APIKey) != "",
+			Kind:               p.Metadata.Kind,
+			SupportsTools:      p.Metadata.SupportsTools,
+			SupportsStreaming:  p.Metadata.SupportsStreaming,
+			SupportsVision:     p.Metadata.SupportsVision,
+			SupportsEmbeddings: p.Metadata.SupportsEmbeddings,
+			Priority:           p.Metadata.Priority,
+			Tags:               append([]string(nil), p.Metadata.Tags...),
+			Enabled:            true,
+		})
 		log.Info("provider_enabled", map[string]any{
-			"name":          name,
-			"type":          "openai_compatible",
-			"auth_required": false,
-			"base_url":      p.BaseURL,
-			"has_api_key":   strings.TrimSpace(p.APIKey) != "",
+			"name":                name,
+			"type":                "openai_compatible",
+			"auth_required":       false,
+			"base_url":            p.BaseURL,
+			"has_api_key":         strings.TrimSpace(p.APIKey) != "",
+			"kind":                p.Metadata.Kind,
+			"supports_tools":      p.Metadata.SupportsTools,
+			"supports_streaming":  p.Metadata.SupportsStreaming,
+			"supports_vision":     p.Metadata.SupportsVision,
+			"supports_embeddings": p.Metadata.SupportsEmbeddings,
+			"priority":            p.Metadata.Priority,
+			"tags":                p.Metadata.Tags,
 		})
 	}
 
