@@ -128,11 +128,11 @@ costguard/
 
 ### 🔀 Multi-Provider Routing
 
-Route requests to different providers based on model or config.
+- Route requests to different providers based on model or config.
 
 ### 🔁 Fallback System
 
-Automatically retry with a fallback provider if the primary fails.
+- Automatically retry with a fallback provider if the primary fails.
 
 ### 🔄 Model Compatibility Mapping
 
