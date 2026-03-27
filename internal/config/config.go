@@ -87,30 +87,54 @@ type AdminConfig struct {
 }
 
 type OpenAIProvider struct {
-	BaseURL string        `json:"base_url"`
-	APIKey  string        `json:"api_key"`
-	Org     string        `json:"org,omitempty"`
-	Project string        `json:"project,omitempty"`
-	Timeout time.Duration `json:"timeout"`
+	BaseURL  string           `json:"base_url"`
+	APIKey   string           `json:"api_key"`
+	Org      string           `json:"org,omitempty"`
+	Project  string           `json:"project,omitempty"`
+	Timeout  time.Duration    `json:"timeout"`
+	Metadata ProviderMetadata `json:"metadata"`
 }
 
 type AnthropicProvider struct {
-	BaseURL          string        `json:"base_url"`
-	APIKey           string        `json:"api_key"`
-	AnthropicVersion string        `json:"anthropic_version,omitempty"`
-	Timeout          time.Duration `json:"timeout"`
+	BaseURL          string           `json:"base_url"`
+	APIKey           string           `json:"api_key"`
+	AnthropicVersion string           `json:"anthropic_version,omitempty"`
+	Timeout          time.Duration    `json:"timeout"`
+	Metadata         ProviderMetadata `json:"metadata"`
 }
 
 type GeminiProvider struct {
-	BaseURL string        `json:"base_url"`
-	APIKey  string        `json:"api_key"`
-	Timeout time.Duration `json:"timeout"`
+	BaseURL  string           `json:"base_url"`
+	APIKey   string           `json:"api_key"`
+	Timeout  time.Duration    `json:"timeout"`
+	Metadata ProviderMetadata `json:"metadata"`
 }
 
 type OpenAICompatibleProvider struct {
-	BaseURL string        `json:"base_url"`
-	APIKey  string        `json:"api_key"`
-	Timeout time.Duration `json:"timeout"`
+	BaseURL  string           `json:"base_url"`
+	APIKey   string           `json:"api_key"`
+	Timeout  time.Duration    `json:"timeout"`
+	Metadata ProviderMetadata `json:"metadata"`
+}
+
+type ProviderMetadata struct {
+	Kind               string   `json:"kind"`
+	SupportsTools      bool     `json:"supports_tools"`
+	SupportsStreaming  bool     `json:"supports_streaming"`
+	SupportsVision     bool     `json:"supports_vision"`
+	SupportsEmbeddings bool     `json:"supports_embeddings"`
+	Priority           int      `json:"priority"`
+	Tags               []string `json:"tags"`
+}
+
+type rawProviderMetadata struct {
+	Kind               string   `json:"kind"`
+	SupportsTools      bool     `json:"supports_tools"`
+	SupportsStreaming  bool     `json:"supports_streaming"`
+	SupportsVision     bool     `json:"supports_vision"`
+	SupportsEmbeddings bool     `json:"supports_embeddings"`
+	Priority           int      `json:"priority"`
+	Tags               []string `json:"tags"`
 }
 
 func Load(path string) (Config, error) {
@@ -128,30 +152,34 @@ func Load(path string) (Config, error) {
 	}
 
 	type rawOpenAIProvider struct {
-		BaseURL string `json:"base_url"`
-		APIKey  string `json:"api_key"`
-		Org     string `json:"org,omitempty"`
-		Project string `json:"project,omitempty"`
-		Timeout string `json:"timeout"`
+		BaseURL  string              `json:"base_url"`
+		APIKey   string              `json:"api_key"`
+		Org      string              `json:"org,omitempty"`
+		Project  string              `json:"project,omitempty"`
+		Timeout  string              `json:"timeout"`
+		Metadata rawProviderMetadata `json:"metadata"`
 	}
 
 	type rawAnthropicProvider struct {
-		BaseURL          string `json:"base_url"`
-		APIKey           string `json:"api_key"`
-		AnthropicVersion string `json:"anthropic_version,omitempty"`
-		Timeout          string `json:"timeout"`
+		BaseURL          string              `json:"base_url"`
+		APIKey           string              `json:"api_key"`
+		AnthropicVersion string              `json:"anthropic_version,omitempty"`
+		Timeout          string              `json:"timeout"`
+		Metadata         rawProviderMetadata `json:"metadata"`
 	}
 
 	type rawGeminiProvider struct {
-		BaseURL string `json:"base_url"`
-		APIKey  string `json:"api_key"`
-		Timeout string `json:"timeout"`
+		BaseURL  string              `json:"base_url"`
+		APIKey   string              `json:"api_key"`
+		Timeout  string              `json:"timeout"`
+		Metadata rawProviderMetadata `json:"metadata"`
 	}
 
 	type rawOpenAICompatibleProvider struct {
-		BaseURL string `json:"base_url"`
-		APIKey  string `json:"api_key"`
-		Timeout string `json:"timeout"`
+		BaseURL  string              `json:"base_url"`
+		APIKey   string              `json:"api_key"`
+		Timeout  string              `json:"timeout"`
+		Metadata rawProviderMetadata `json:"metadata"`
 	}
 
 	type rawReports struct {
@@ -258,11 +286,12 @@ func Load(path string) (Config, error) {
 		}
 
 		c.Providers.OpenAI[name] = OpenAIProvider{
-			BaseURL: p.BaseURL,
-			APIKey:  resolveEnvIfPresent(p.APIKey),
-			Org:     p.Org,
-			Project: p.Project,
-			Timeout: to,
+			BaseURL:  p.BaseURL,
+			APIKey:   resolveEnvIfPresent(p.APIKey),
+			Org:      p.Org,
+			Project:  p.Project,
+			Timeout:  to,
+			Metadata: normalizeProviderMetadata(p.Metadata),
 		}
 	}
 
@@ -282,6 +311,7 @@ func Load(path string) (Config, error) {
 			APIKey:           resolveEnvIfPresent(p.APIKey),
 			AnthropicVersion: p.AnthropicVersion,
 			Timeout:          to,
+			Metadata:         normalizeProviderMetadata(p.Metadata),
 		}
 	}
 
@@ -297,9 +327,10 @@ func Load(path string) (Config, error) {
 		}
 
 		c.Providers.Gemini[name] = GeminiProvider{
-			BaseURL: p.BaseURL,
-			APIKey:  resolveEnvIfPresent(p.APIKey),
-			Timeout: to,
+			BaseURL:  p.BaseURL,
+			APIKey:   resolveEnvIfPresent(p.APIKey),
+			Timeout:  to,
+			Metadata: normalizeProviderMetadata(p.Metadata),
 		}
 	}
 
@@ -315,9 +346,10 @@ func Load(path string) (Config, error) {
 		}
 
 		c.Providers.OpenAICompatible[name] = OpenAICompatibleProvider{
-			BaseURL: p.BaseURL,
-			APIKey:  resolveEnvIfPresent(p.APIKey), // optional
-			Timeout: to,
+			BaseURL:  p.BaseURL,
+			APIKey:   resolveEnvIfPresent(p.APIKey), // optional
+			Timeout:  to,
+			Metadata: normalizeProviderMetadata(p.Metadata),
 		}
 	}
 
@@ -395,4 +427,25 @@ func hasUsableOpenAICompatible(c Config) bool {
 		}
 	}
 	return false
+}
+
+func normalizeProviderMetadata(in rawProviderMetadata) ProviderMetadata {
+	kind := strings.TrimSpace(strings.ToLower(in.Kind))
+	switch kind {
+	case "cloud", "local":
+	default:
+		kind = ""
+	}
+
+	out := ProviderMetadata{
+		Kind:               kind,
+		SupportsTools:      in.SupportsTools,
+		SupportsStreaming:  in.SupportsStreaming,
+		SupportsVision:     in.SupportsVision,
+		SupportsEmbeddings: in.SupportsEmbeddings,
+		Priority:           in.Priority,
+		Tags:               append([]string(nil), in.Tags...),
+	}
+
+	return out
 }
