@@ -141,11 +141,34 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 		}
 	}
 
-	cacheable := g.isCacheableRequest(r, bodyBytes)
+	effectiveModel := model
+	effectiveBodyBytes := bodyBytes
+
+	if compatible := g.compatibleModelForProvider(model, providerName); compatible != "" && compatible != model {
+		rewrittenBody, rewriteErr := rewriteModelInBody(bodyBytes, compatible)
+		if rewriteErr != nil {
+			return nil, rewriteErr
+		}
+
+		effectiveBodyBytes = rewrittenBody
+		effectiveModel = compatible
+
+		if g.log != nil {
+			g.log.Info("model_rewritten_for_provider", map[string]any{
+				"request_id": server.RequestIDFromContext(r.Context()),
+				"provider":   providerName,
+				"from_model": model,
+				"to_model":   compatible,
+				"path":       r.URL.Path,
+			})
+		}
+	}
+
+	cacheable := g.isCacheableRequest(r, effectiveBodyBytes)
 	cacheKey := ""
 
 	if cacheable && g.cache != nil && g.cacheTTL > 0 {
-		cacheKey = buildCacheKey(r, bodyBytes)
+		cacheKey = buildCacheKey(r, effectiveBodyBytes)
 
 		if entry, ok := g.cache.Get(cacheKey); ok {
 			if g.log != nil {
@@ -153,11 +176,11 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 					"request_id": server.RequestIDFromContext(r.Context()),
 					"key":        shortKey(cacheKey),
 					"path":       r.URL.Path,
-					"model":      model,
+					"model":      effectiveModel,
 				})
 			}
 
-			g.meterResponse(r, providerName, model, entry.Body, true, http.StatusOK)
+			g.meterResponse(r, providerName, effectiveModel, entry.Body, true, http.StatusOK)
 			return responseFromCacheEntry(r, entry), nil
 		}
 
@@ -166,7 +189,7 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 				"request_id": server.RequestIDFromContext(r.Context()),
 				"key":        shortKey(cacheKey),
 				"path":       r.URL.Path,
-				"model":      model,
+				"model":      effectiveModel,
 			})
 		}
 	}
@@ -184,7 +207,7 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 					g.log.Error("monthly_budget_exceeded", map[string]any{
 						"request_id": server.RequestIDFromContext(r.Context()),
 						"path":       r.URL.Path,
-						"model":      model,
+						"model":      effectiveModel,
 						"provider":   providerName,
 					})
 				}
@@ -202,7 +225,7 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 						"request_id": server.RequestIDFromContext(r.Context()),
 						"path":       r.URL.Path,
 						"team":       team,
-						"model":      model,
+						"model":      effectiveModel,
 						"provider":   providerName,
 					})
 				}
@@ -220,7 +243,7 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 						"request_id": server.RequestIDFromContext(r.Context()),
 						"path":       r.URL.Path,
 						"project":    project,
-						"model":      model,
+						"model":      effectiveModel,
 						"provider":   providerName,
 					})
 				}
@@ -243,10 +266,11 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 			"requested_provider": requestedProvider,
 			"requested_mode":     hintedMode,
 			"path":               r.URL.Path,
+			"model":              effectiveModel,
 		})
 	}
 
-	resp, actualProvider, finalModel, err := g.callProviderWithFallback(r, providerName, bodyBytes, model)
+	resp, actualProvider, finalModel, err := g.callProviderWithFallback(r, providerName, effectiveBodyBytes, effectiveModel)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +281,7 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 			"requested_provider": requestedProvider,
 			"actual_provider":    actualProvider,
 			"requested_mode":     hintedMode,
-			"original_model":     model,
+			"original_model":     effectiveModel,
 			"final_model":        finalModel,
 			"path":               r.URL.Path,
 		})

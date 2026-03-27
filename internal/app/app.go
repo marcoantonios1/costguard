@@ -498,6 +498,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		Log:             log,
 		Budget:          budgetSvc,
 		ProviderCatalog: catalog,
+		ModeToProvider:  cfg.Routing.ModeToProvider,
 	})
 
 	protectedAdmin := server.AdminAuth(cfg.Admin.APIKey)(adminMux)
