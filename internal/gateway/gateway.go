@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/marcoantonios1/costguard/internal/cache"
@@ -42,6 +43,7 @@ type Gateway struct {
 	budgetChecker      BudgetChecker
 	alertStore         AlertStore
 	notifier           Notifier
+	modeToProvider     map[string]string
 }
 
 type Deps struct {
@@ -57,6 +59,7 @@ type Deps struct {
 	BudgetChecker      BudgetChecker
 	AlertStore         AlertStore
 	Notifier           Notifier
+	ModeToProvider     map[string]string
 }
 
 type openAIUsageResponse struct {
@@ -76,6 +79,11 @@ func New(d Deps) (*Gateway, error) {
 		return nil, errors.New("registry is required")
 	}
 
+	modeMap := map[string]string{}
+	for k, v := range d.ModeToProvider {
+		modeMap[strings.ToLower(strings.TrimSpace(k))] = strings.TrimSpace(v)
+	}
+
 	return &Gateway{
 		router:             d.Router,
 		reg:                d.Registry,
@@ -88,5 +96,6 @@ func New(d Deps) (*Gateway, error) {
 		budgetChecker:      d.BudgetChecker,
 		alertStore:         d.AlertStore,
 		notifier:           d.Notifier,
+		modeToProvider:     modeMap,
 	}, nil
 }

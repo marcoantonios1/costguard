@@ -473,6 +473,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		Log:                log,
 		FallbackProvider:   cfg.Routing.FallbackProvider,
 		ModelCompatibility: cfg.Routing.ModelCompatibility,
+		ModeToProvider:     cfg.Routing.ModeToProvider,
 		Cache:              c,
 		CacheTTL:           cfg.Cache.TTL,
 		UsageStore:         usageStore,
@@ -497,6 +498,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		Log:             log,
 		Budget:          budgetSvc,
 		ProviderCatalog: catalog,
+		ModeToProvider:  cfg.Routing.ModeToProvider,
 	})
 
 	protectedAdmin := server.AdminAuth(cfg.Admin.APIKey)(adminMux)

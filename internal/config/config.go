@@ -46,6 +46,7 @@ type RoutingConfig struct {
 	FallbackProvider   string                       `json:"fallback_provider"`
 	ModelToProvider    map[string]string            `json:"model_to_provider"`
 	ModelCompatibility map[string]map[string]string `json:"model_compatibility"`
+	ModeToProvider     map[string]string            `json:"mode_to_provider"`
 }
 
 type ProvidersConfig struct {
