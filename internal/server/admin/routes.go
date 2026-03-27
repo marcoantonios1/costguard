@@ -5,15 +5,17 @@ import (
 
 	"github.com/marcoantonios1/costguard/internal/budget"
 	"github.com/marcoantonios1/costguard/internal/logging"
+	"github.com/marcoantonios1/costguard/internal/providers"
 	"github.com/marcoantonios1/costguard/internal/report"
 	"github.com/marcoantonios1/costguard/internal/usage"
 )
 
 type Deps struct {
-	UsageStore usage.Store
-	Reports    *report.EmailService
-	Log        *logging.Log
-	Budget     *budget.Service
+	UsageStore      usage.Store
+	Reports         *report.EmailService
+	Log             *logging.Log
+	Budget          *budget.Service
+	ProviderCatalog *providers.Catalog
 }
 
 func Register(mux *http.ServeMux, d Deps) {
@@ -31,5 +33,9 @@ func Register(mux *http.ServeMux, d Deps) {
 	if d.Budget != nil {
 		budgetHandler := NewBudgetHandler(d.Budget)
 		mux.HandleFunc("/budget/status", budgetHandler.Status)
+	}
+
+	if d.ProviderCatalog != nil {
+		mux.HandleFunc("/providers", ProvidersHandler(d.ProviderCatalog))
 	}
 }

@@ -492,10 +492,11 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 
 	adminMux := http.NewServeMux()
 	admin.Register(adminMux, admin.Deps{
-		UsageStore: usageStore,
-		Reports:    reportEmailSvc,
-		Log:        log,
-		Budget:     budgetSvc,
+		UsageStore:      usageStore,
+		Reports:         reportEmailSvc,
+		Log:             log,
+		Budget:          budgetSvc,
+		ProviderCatalog: catalog,
 	})
 
 	protectedAdmin := server.AdminAuth(cfg.Admin.APIKey)(adminMux)
