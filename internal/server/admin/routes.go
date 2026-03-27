@@ -16,6 +16,7 @@ type Deps struct {
 	Log             *logging.Log
 	Budget          *budget.Service
 	ProviderCatalog *providers.Catalog
+	ModeToProvider  map[string]string
 }
 
 func Register(mux *http.ServeMux, d Deps) {
@@ -37,5 +38,9 @@ func Register(mux *http.ServeMux, d Deps) {
 
 	if d.ProviderCatalog != nil {
 		mux.HandleFunc("/providers", ProvidersHandler(d.ProviderCatalog))
+	}
+
+	if d.ModeToProvider != nil {
+		mux.HandleFunc("/routing/modes", ModesHandler(d.ModeToProvider))
 	}
 }

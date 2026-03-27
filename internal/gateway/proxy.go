@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/marcoantonios1/costguard/internal/budget"
@@ -22,6 +23,8 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 	model := extractModel(bodyBytes)
 
 	hintedProvider := requestedProviderHint(r)
+	hintedMode := requestedModeHint(r)
+
 	requestedProvider := ""
 	providerName := ""
 
@@ -51,6 +54,75 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 			g.log.Info("provider_hint_accepted", map[string]any{
 				"request_id": server.RequestIDFromContext(r.Context()),
 				"provider":   hintedProvider,
+				"path":       r.URL.Path,
+				"model":      model,
+			})
+		}
+	} else if hintedMode != "" {
+		if !isSupportedMode(hintedMode) {
+			if g.log != nil {
+				g.log.Info("mode_hint_rejected", map[string]any{
+					"request_id": server.RequestIDFromContext(r.Context()),
+					"mode":       hintedMode,
+					"path":       r.URL.Path,
+					"model":      model,
+					"reason":     "unsupported_mode",
+				})
+			}
+
+			return newJSONErrorResponse(
+				r,
+				http.StatusBadRequest,
+				"unsupported mode hint: "+hintedMode,
+			), nil
+		}
+
+		modeProvider := strings.TrimSpace(g.modeToProvider[hintedMode])
+		if modeProvider == "" {
+			if g.log != nil {
+				g.log.Info("mode_hint_rejected", map[string]any{
+					"request_id": server.RequestIDFromContext(r.Context()),
+					"mode":       hintedMode,
+					"path":       r.URL.Path,
+					"model":      model,
+					"reason":     "mode_not_configured",
+				})
+			}
+
+			return newJSONErrorResponse(
+				r,
+				http.StatusBadRequest,
+				"mode not configured: "+hintedMode,
+			), nil
+		}
+
+		if _, err := g.reg.Get(modeProvider); err != nil {
+			if g.log != nil {
+				g.log.Info("mode_hint_rejected", map[string]any{
+					"request_id": server.RequestIDFromContext(r.Context()),
+					"mode":       hintedMode,
+					"provider":   modeProvider,
+					"path":       r.URL.Path,
+					"model":      model,
+					"reason":     "unknown_provider",
+				})
+			}
+
+			return newJSONErrorResponse(
+				r,
+				http.StatusBadRequest,
+				"configured provider for mode is unavailable: "+hintedMode,
+			), nil
+		}
+
+		requestedProvider = modeProvider
+		providerName = modeProvider
+
+		if g.log != nil {
+			g.log.Info("mode_hint_accepted", map[string]any{
+				"request_id": server.RequestIDFromContext(r.Context()),
+				"mode":       hintedMode,
+				"provider":   modeProvider,
 				"path":       r.URL.Path,
 				"model":      model,
 			})
@@ -169,6 +241,7 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 			"request_id":         server.RequestIDFromContext(r.Context()),
 			"provider":           providerName,
 			"requested_provider": requestedProvider,
+			"requested_mode":     hintedMode,
 			"path":               r.URL.Path,
 		})
 	}
@@ -183,6 +256,7 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 			"request_id":         server.RequestIDFromContext(r.Context()),
 			"requested_provider": requestedProvider,
 			"actual_provider":    actualProvider,
+			"requested_mode":     hintedMode,
 			"original_model":     model,
 			"final_model":        finalModel,
 			"path":               r.URL.Path,
