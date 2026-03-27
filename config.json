@@ -34,22 +34,24 @@
 
   "routing": {
     "default_provider": "anthropic_primary",
-    "fallback_provider": "openai_backup",
+    "fallback_provider": "openai_primary",
     "model_to_provider": {
       "gpt-4o-mini": "openai_primary",
-      "claude-3-5-sonnet-latest": "anthropic_primary",
-      "gemini-2.5-flash": "google_primary"
+      "claude-sonnet-4-6": "anthropic_primary",
+      "gemini-2.5-flash": "google_primary",
+      "llama3.2": "local_ollama"
     },
     "model_compatibility": {
-      "claude-3-5-sonnet-latest": {
-        "openai_backup": "gpt-4o-mini",
+      "claude-sonnet-4-6": {
         "openai_primary": "gpt-4o-mini",
         "google_primary": "gemini-2.5-flash"
       },
       "gemini-2.5-flash": {
-        "openai_backup": "gpt-4o-mini",
         "openai_primary": "gpt-4o-mini",
-        "anthropic_primary": "claude-3-5-sonnet-latest"
+        "anthropic_primary": "claude-sonnet-4-6"
+      },
+      "llama3.2": {
+        "openai_primary": "gpt-4o-mini"
       }
     }
   },
@@ -71,12 +73,16 @@
       "openai_primary": {
         "base_url": "https://api.openai.com",
         "api_key": "env:OPENAI_API_KEY",
-        "timeout": "60s"
-      },
-      "openai_backup": {
-        "base_url": "https://api.openai.com",
-        "api_key": "env:OPENAI_API_KEY",
-        "timeout": "60s"
+        "timeout": "60s",
+        "metadata": {
+          "kind": "cloud",
+          "supports_tools": true,
+          "supports_streaming": true,
+          "supports_vision": true,
+          "supports_embeddings": false,
+          "priority": 95,
+          "tags": ["premium", "general"]
+        }
       }
     },
     "anthropic": {
@@ -84,26 +90,62 @@
         "base_url": "https://api.anthropic.com",
         "api_key": "env:ANTHROPIC_API_KEY",
         "anthropic_version": "2023-06-01",
-        "timeout": "60s"
+        "timeout": "60s",
+        "metadata": {
+          "kind": "cloud",
+          "supports_tools": true,
+          "supports_streaming": true,
+          "supports_vision": true,
+          "supports_embeddings": false,
+          "priority": 100,
+          "tags": ["reasoning", "premium"]
+        }
       }
     },
     "gemini": {
       "google_primary": {
         "base_url": "https://generativelanguage.googleapis.com",
         "api_key": "env:GEMINI_API_KEY",
-        "timeout": "60s"
+        "timeout": "60s",
+        "metadata": {
+          "kind": "cloud",
+          "supports_tools": false,
+          "supports_streaming": false,
+          "supports_vision": true,
+          "supports_embeddings": false,
+          "priority": 90,
+          "tags": ["fast", "cheap", "general"]
+        }
       }
     },
     "openai_compatible": {
       "local_ollama": {
         "base_url": "http://host.docker.internal:11434",
         "api_key": "",
-        "timeout": "60s"
+        "timeout": "60s",
+        "metadata": {
+          "kind": "local",
+          "supports_tools": false,
+          "supports_streaming": true,
+          "supports_vision": false,
+          "supports_embeddings": false,
+          "priority": 50,
+          "tags": ["cheap", "private", "local"]
+        }
       },
       "local_vllm": {
         "base_url": "http://host.docker.internal:8000",
         "api_key": "",
-        "timeout": "60s"
+        "timeout": "60s",
+        "metadata": {
+          "kind": "local",
+          "supports_tools": false,
+          "supports_streaming": true,
+          "supports_vision": false,
+          "supports_embeddings": false,
+          "priority": 50,
+          "tags": ["cheap", "private", "local"]
+        }
       }
     }
   }
