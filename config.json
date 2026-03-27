@@ -53,6 +53,12 @@
       "llama3.2": {
         "openai_primary": "gpt-4o-mini"
       }
+    },
+    "mode_to_provider": {
+      "cheap": "google_primary",
+      "balanced": "openai_primary",
+      "best": "anthropic_primary",
+      "private": "local_ollama"
     }
   },
 
