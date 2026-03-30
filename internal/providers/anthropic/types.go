@@ -1,14 +1,27 @@
 package anthropic
 
 type openAIChatCompletionRequest struct {
-	Model       string              `json:"model"`
-	Messages    []openAIMessage     `json:"messages"`
-	MaxTokens   int                 `json:"max_tokens,omitempty"`
-	Temperature *float64            `json:"temperature,omitempty"`
-	TopP        *float64            `json:"top_p,omitempty"`
-	Stop        any                 `json:"stop,omitempty"`
-	User        string              `json:"user,omitempty"`
-	Stream      bool                `json:"stream,omitempty"`
+	Model       string          `json:"model"`
+	Messages    []openAIMessage `json:"messages"`
+	MaxTokens   int             `json:"max_tokens,omitempty"`
+	Temperature *float64        `json:"temperature,omitempty"`
+	TopP        *float64        `json:"top_p,omitempty"`
+	Stop        any             `json:"stop,omitempty"`
+	User        string          `json:"user,omitempty"`
+	Stream      bool            `json:"stream,omitempty"`
+	Tools       []openAITool    `json:"tools,omitempty"`
+	ToolChoice  any             `json:"tool_choice,omitempty"`
+}
+
+type openAITool struct {
+	Type     string           `json:"type"`
+	Function openAIToolFunction `json:"function"`
+}
+
+type openAIToolFunction struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Parameters  any    `json:"parameters,omitempty"`
 }
 
 type openAIMessage struct {
@@ -17,14 +30,33 @@ type openAIMessage struct {
 }
 
 type anthropicMessagesRequest struct {
-	Model       string             `json:"model"`
-	System      string             `json:"system,omitempty"`
-	Messages    []anthropicMessage `json:"messages"`
-	MaxTokens   int                `json:"max_tokens"`
-	Temperature *float64           `json:"temperature,omitempty"`
-	TopP        *float64           `json:"top_p,omitempty"`
-	StopSeqs    []string           `json:"stop_sequences,omitempty"`
-	Stream      bool               `json:"stream,omitempty"`
+	Model       string              `json:"model"`
+	System      string              `json:"system,omitempty"`
+	Messages    []anthropicMessage  `json:"messages"`
+	MaxTokens   int                 `json:"max_tokens"`
+	Temperature *float64            `json:"temperature,omitempty"`
+	TopP        *float64            `json:"top_p,omitempty"`
+	StopSeqs    []string            `json:"stop_sequences,omitempty"`
+	Stream      bool                `json:"stream,omitempty"`
+	Tools       []anthropicTool     `json:"tools,omitempty"`
+	ToolChoice  *anthropicToolChoice `json:"tool_choice,omitempty"`
+}
+
+type anthropicTool struct {
+	Name        string                   `json:"name"`
+	Description string                   `json:"description,omitempty"`
+	InputSchema anthropicToolInputSchema  `json:"input_schema"`
+}
+
+type anthropicToolInputSchema struct {
+	Type       string         `json:"type"`
+	Properties any            `json:"properties,omitempty"`
+	Required   []string       `json:"required,omitempty"`
+}
+
+type anthropicToolChoice struct {
+	Type string `json:"type"`
+	Name string `json:"name,omitempty"`
 }
 
 type anthropicMessage struct {
