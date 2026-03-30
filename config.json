@@ -120,7 +120,7 @@
         "timeout": "60s",
         "metadata": {
           "kind": "cloud",
-          "supports_tools": false,
+          "supports_tools": true,
           "supports_streaming": false,
           "supports_vision": true,
           "supports_embeddings": false,
