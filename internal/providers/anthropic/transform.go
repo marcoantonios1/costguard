@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -202,11 +203,35 @@ func toOpenAIResponse(requestModel string, in anthropicMessagesResponse) openAIC
 		model = requestModel
 	}
 
-	content := make([]string, 0, len(in.Content))
+	var textParts []string
+	var toolCalls []openAIToolCall
+
 	for _, block := range in.Content {
-		if block.Type == "text" {
-			content = append(content, block.Text)
+		switch block.Type {
+		case "text":
+			textParts = append(textParts, block.Text)
+		case "tool_use":
+			args, _ := json.Marshal(block.Input)
+			toolCalls = append(toolCalls, openAIToolCall{
+				ID:   block.ID,
+				Type: "function",
+				Function: openAIToolCallFunction{
+					Name:      block.Name,
+					Arguments: string(args),
+				},
+			})
 		}
+	}
+
+	msg := openAIAssistantMsg{Role: "assistant"}
+
+	if len(toolCalls) > 0 {
+		msg.ToolCalls = toolCalls
+		// OpenAI sets content to null when tool_calls are present
+		msg.Content = nil
+	} else {
+		text := strings.Join(textParts, "\n")
+		msg.Content = &text
 	}
 
 	promptTokens := in.Usage.InputTokens + in.Usage.CacheCreationInputTokens + in.Usage.CacheReadInputTokens
@@ -219,11 +244,8 @@ func toOpenAIResponse(requestModel string, in anthropicMessagesResponse) openAIC
 		Model:   model,
 		Choices: []openAIChoice{
 			{
-				Index: 0,
-				Message: openAIAssistantMsg{
-					Role:    "assistant",
-					Content: strings.Join(content, "\n"),
-				},
+				Index:        0,
+				Message:      msg,
 				FinishReason: mapStopReason(in.StopReason),
 			},
 		},

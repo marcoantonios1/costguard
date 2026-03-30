@@ -145,3 +145,120 @@ func TestToolChoiceUnsupportedStringErrors(t *testing.T) {
 		t.Error("expected error for unknown tool_choice string")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// toOpenAIResponse — tool_use block mapping
+// ---------------------------------------------------------------------------
+
+func TestToolUseBlockMappedToToolCalls(t *testing.T) {
+	in := anthropicMessagesResponse{
+		ID:         "msg_01",
+		Model:      "claude-3-5-sonnet-20241022",
+		StopReason: "tool_use",
+		Content: []anthropicContentBlock{
+			{
+				Type:  "tool_use",
+				ID:    "toolu_abc",
+				Name:  "get_weather",
+				Input: map[string]any{"location": "London"},
+			},
+		},
+		Usage: anthropicUsage{InputTokens: 10, OutputTokens: 5},
+	}
+
+	out := toOpenAIResponse("claude-3-5-sonnet-20241022", in)
+
+	if out.Choices[0].FinishReason != "tool_calls" {
+		t.Errorf("finish_reason: got %q, want %q", out.Choices[0].FinishReason, "tool_calls")
+	}
+	msg := out.Choices[0].Message
+	if msg.Content != nil {
+		t.Errorf("content should be nil when tool_calls present, got %q", *msg.Content)
+	}
+	if len(msg.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(msg.ToolCalls))
+	}
+	tc := msg.ToolCalls[0]
+	if tc.ID != "toolu_abc" {
+		t.Errorf("tool_call id: got %q, want %q", tc.ID, "toolu_abc")
+	}
+	if tc.Type != "function" {
+		t.Errorf("tool_call type: got %q, want %q", tc.Type, "function")
+	}
+	if tc.Function.Name != "get_weather" {
+		t.Errorf("function name: got %q, want %q", tc.Function.Name, "get_weather")
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+		t.Fatalf("arguments not valid JSON: %v", err)
+	}
+	if args["location"] != "London" {
+		t.Errorf("arguments location: got %v", args["location"])
+	}
+}
+
+func TestMultipleToolUseBlocksMapped(t *testing.T) {
+	in := anthropicMessagesResponse{
+		ID:         "msg_02",
+		StopReason: "tool_use",
+		Content: []anthropicContentBlock{
+			{Type: "tool_use", ID: "toolu_1", Name: "fn1", Input: map[string]any{"a": 1}},
+			{Type: "tool_use", ID: "toolu_2", Name: "fn2", Input: map[string]any{"b": 2}},
+		},
+		Usage: anthropicUsage{InputTokens: 10, OutputTokens: 5},
+	}
+
+	out := toOpenAIResponse("", in)
+
+	if len(out.Choices[0].Message.ToolCalls) != 2 {
+		t.Fatalf("expected 2 tool calls, got %d", len(out.Choices[0].Message.ToolCalls))
+	}
+	if out.Choices[0].Message.ToolCalls[1].Function.Name != "fn2" {
+		t.Errorf("second tool call name wrong")
+	}
+}
+
+func TestMixedTextAndToolUseResponse(t *testing.T) {
+	in := anthropicMessagesResponse{
+		ID:         "msg_03",
+		StopReason: "tool_use",
+		Content: []anthropicContentBlock{
+			{Type: "text", Text: "Let me check that."},
+			{Type: "tool_use", ID: "toolu_3", Name: "get_weather", Input: map[string]any{"location": "Paris"}},
+		},
+		Usage: anthropicUsage{InputTokens: 10, OutputTokens: 5},
+	}
+
+	out := toOpenAIResponse("", in)
+
+	msg := out.Choices[0].Message
+	// tool_calls present → content nil
+	if msg.Content != nil {
+		t.Errorf("expected content nil in mixed response, got %q", *msg.Content)
+	}
+	if len(msg.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(msg.ToolCalls))
+	}
+}
+
+func TestTextOnlyResponseHasNoToolCalls(t *testing.T) {
+	in := anthropicMessagesResponse{
+		ID:         "msg_04",
+		StopReason: "end_turn",
+		Content:    []anthropicContentBlock{{Type: "text", Text: "Hello!"}},
+		Usage:      anthropicUsage{InputTokens: 5, OutputTokens: 3},
+	}
+
+	out := toOpenAIResponse("", in)
+
+	msg := out.Choices[0].Message
+	if len(msg.ToolCalls) != 0 {
+		t.Errorf("expected no tool calls for text response")
+	}
+	if msg.Content == nil || *msg.Content != "Hello!" {
+		t.Errorf("content: got %v", msg.Content)
+	}
+	if out.Choices[0].FinishReason != "stop" {
+		t.Errorf("finish_reason: got %q, want %q", out.Choices[0].FinishReason, "stop")
+	}
+}
