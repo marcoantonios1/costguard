@@ -79,7 +79,95 @@ func toAnthropicRequest(in openAIChatCompletionRequest) (anthropicMessagesReques
 		return anthropicMessagesRequest{}, fmt.Errorf("at least one non-system message is required")
 	}
 
+	toolChoice, omitTools, err := mapToolChoice(in.ToolChoice)
+	if err != nil {
+		return anthropicMessagesRequest{}, err
+	}
+
+	if !omitTools && len(in.Tools) > 0 {
+		for _, t := range in.Tools {
+			out.Tools = append(out.Tools, anthropicTool{
+				Name:        t.Function.Name,
+				Description: t.Function.Description,
+				InputSchema: anthropicToolInputSchema{
+					Type:       schemaType(t.Function.Parameters),
+					Properties: schemaProperties(t.Function.Parameters),
+					Required:   schemaRequired(t.Function.Parameters),
+				},
+			})
+		}
+		out.ToolChoice = toolChoice
+	}
+
 	return out, nil
+}
+
+// mapToolChoice converts an OpenAI tool_choice value to its Anthropic equivalent.
+// Returns (toolChoice, omitTools, error). omitTools=true for "none".
+func mapToolChoice(v any) (*anthropicToolChoice, bool, error) {
+	if v == nil {
+		return nil, false, nil
+	}
+	switch val := v.(type) {
+	case string:
+		switch val {
+		case "none":
+			return nil, true, nil
+		case "auto":
+			return &anthropicToolChoice{Type: "auto"}, false, nil
+		case "required":
+			return &anthropicToolChoice{Type: "any"}, false, nil
+		default:
+			return nil, false, fmt.Errorf("unsupported tool_choice string: %s", val)
+		}
+	case map[string]any:
+		fn, _ := val["function"].(map[string]any)
+		name, _ := fn["name"].(string)
+		if name == "" {
+			return nil, false, fmt.Errorf("tool_choice object missing function.name")
+		}
+		return &anthropicToolChoice{Type: "tool", Name: name}, false, nil
+	default:
+		return nil, false, fmt.Errorf("unsupported tool_choice format")
+	}
+}
+
+func schemaType(params any) string {
+	m, ok := params.(map[string]any)
+	if !ok {
+		return "object"
+	}
+	t, _ := m["type"].(string)
+	if t == "" {
+		return "object"
+	}
+	return t
+}
+
+func schemaProperties(params any) any {
+	m, ok := params.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return m["properties"]
+}
+
+func schemaRequired(params any) []string {
+	m, ok := params.(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := m["required"].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, r := range raw {
+		if s, ok := r.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func openAIContentToText(v any) (string, error) {
