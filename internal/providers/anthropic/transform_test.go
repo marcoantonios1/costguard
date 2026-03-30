@@ -262,3 +262,141 @@ func TestTextOnlyResponseHasNoToolCalls(t *testing.T) {
 		t.Errorf("finish_reason: got %q, want %q", out.Choices[0].FinishReason, "stop")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// tool role messages (tool results)
+// ---------------------------------------------------------------------------
+
+func TestToolRoleMessageMappedToToolResult(t *testing.T) {
+	raw := `{
+		"model": "claude-3-5-sonnet-20241022",
+		"messages": [
+			{"role": "user", "content": "What is the weather in London?"},
+			{"role": "assistant", "content": null, "tool_calls": [{"id": "toolu_1", "type": "function", "function": {"name": "get_weather", "arguments": "{\"location\":\"London\"}"}}]},
+			{"role": "tool", "tool_call_id": "toolu_1", "content": "15°C and cloudy"}
+		]
+	}`
+	out, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Expect: user, assistant (tool_use), user (tool_result)
+	if len(out.Messages) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(out.Messages))
+	}
+
+	assistantMsg := out.Messages[1]
+	if assistantMsg.Role != "assistant" {
+		t.Errorf("message[1] role: got %q, want assistant", assistantMsg.Role)
+	}
+	if len(assistantMsg.Content) != 1 || assistantMsg.Content[0].Type != "tool_use" {
+		t.Errorf("message[1] should have a tool_use block, got %+v", assistantMsg.Content)
+	}
+	toolUse := assistantMsg.Content[0]
+	if toolUse.ID != "toolu_1" || toolUse.Name != "get_weather" {
+		t.Errorf("tool_use block: id=%q name=%q", toolUse.ID, toolUse.Name)
+	}
+
+	resultMsg := out.Messages[2]
+	if resultMsg.Role != "user" {
+		t.Errorf("message[2] role: got %q, want user", resultMsg.Role)
+	}
+	if len(resultMsg.Content) != 1 || resultMsg.Content[0].Type != "tool_result" {
+		t.Errorf("message[2] should have a tool_result block, got %+v", resultMsg.Content)
+	}
+	tr := resultMsg.Content[0]
+	if tr.ToolUseID != "toolu_1" {
+		t.Errorf("tool_result tool_use_id: got %q, want toolu_1", tr.ToolUseID)
+	}
+	if tr.Content != "15°C and cloudy" {
+		t.Errorf("tool_result content: got %q", tr.Content)
+	}
+}
+
+func TestAssistantMessageWithToolCallsConvertsArguments(t *testing.T) {
+	raw := `{
+		"model": "claude-3-5-sonnet-20241022",
+		"messages": [
+			{"role": "user", "content": "hi"},
+			{"role": "assistant", "content": null, "tool_calls": [{"id": "tc_1", "type": "function", "function": {"name": "fn", "arguments": "{\"key\":\"value\"}"}}]}
+		]
+	}`
+	out, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	block := out.Messages[1].Content[0]
+	if block.Type != "tool_use" {
+		t.Fatalf("expected tool_use block, got %q", block.Type)
+	}
+	input, ok := block.Input.(map[string]any)
+	if !ok {
+		t.Fatalf("input not a map, got %T", block.Input)
+	}
+	if input["key"] != "value" {
+		t.Errorf("input key: got %v", input["key"])
+	}
+}
+
+func TestParallelToolResultsCoalescedIntoSingleUserMessage(t *testing.T) {
+	raw := `{
+		"model": "claude-3-5-sonnet-20241022",
+		"messages": [
+			{"role": "user", "content": "hi"},
+			{"role": "assistant", "content": null, "tool_calls": [
+				{"id": "tc_1", "type": "function", "function": {"name": "fn1", "arguments": "{}"}},
+				{"id": "tc_2", "type": "function", "function": {"name": "fn2", "arguments": "{}"}}
+			]},
+			{"role": "tool", "tool_call_id": "tc_1", "content": "result1"},
+			{"role": "tool", "tool_call_id": "tc_2", "content": "result2"}
+		]
+	}`
+	out, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Expect: user, assistant, user (with 2 tool_result blocks — not 2 separate user messages)
+	if len(out.Messages) != 3 {
+		t.Fatalf("expected 3 messages (parallel results coalesced), got %d", len(out.Messages))
+	}
+	resultMsg := out.Messages[2]
+	if resultMsg.Role != "user" {
+		t.Errorf("coalesced message role: got %q, want user", resultMsg.Role)
+	}
+	if len(resultMsg.Content) != 2 {
+		t.Fatalf("expected 2 tool_result blocks, got %d", len(resultMsg.Content))
+	}
+	if resultMsg.Content[0].ToolUseID != "tc_1" || resultMsg.Content[1].ToolUseID != "tc_2" {
+		t.Errorf("tool_use_ids: %q %q", resultMsg.Content[0].ToolUseID, resultMsg.Content[1].ToolUseID)
+	}
+}
+
+func TestFullToolCallingCycleProducesCorrectMessageSequence(t *testing.T) {
+	// Full loop: user → assistant (tool_use) → tool result → user follow-up
+	raw := `{
+		"model": "claude-3-5-sonnet-20241022",
+		"messages": [
+			{"role": "user", "content": "What is the weather in London?"},
+			{"role": "assistant", "content": null, "tool_calls": [{"id": "tc_1", "type": "function", "function": {"name": "get_weather", "arguments": "{\"location\":\"London\"}"}}]},
+			{"role": "tool", "tool_call_id": "tc_1", "content": "15°C and cloudy"},
+			{"role": "user", "content": "Thanks!"}
+		]
+	}`
+	out, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out.Messages) != 4 {
+		t.Fatalf("expected 4 messages, got %d", len(out.Messages))
+	}
+	roles := []string{"user", "assistant", "user", "user"}
+	types := []string{"text", "tool_use", "tool_result", "text"}
+	for i, msg := range out.Messages {
+		if msg.Role != roles[i] {
+			t.Errorf("message[%d] role: got %q, want %q", i, msg.Role, roles[i])
+		}
+		if len(msg.Content) == 0 || msg.Content[0].Type != types[i] {
+			t.Errorf("message[%d] content[0].type: got %q, want %q", i, msg.Content[0].Type, types[i])
+		}
+	}
+}

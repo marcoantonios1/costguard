@@ -52,25 +52,74 @@ func toAnthropicRequest(in openAIChatCompletionRequest) (anthropicMessagesReques
 	}
 
 	for _, msg := range in.Messages {
-		text, err := openAIContentToText(msg.Content)
-		if err != nil {
-			return anthropicMessagesRequest{}, err
-		}
-
 		switch msg.Role {
 		case "system":
+			text, err := openAIContentToText(msg.Content)
+			if err != nil {
+				return anthropicMessagesRequest{}, err
+			}
 			if out.System == "" {
 				out.System = text
 			} else if text != "" {
 				out.System += "\n\n" + text
 			}
-		case "user", "assistant":
+
+		case "assistant":
+			if len(msg.ToolCalls) > 0 {
+				var blocks []anthropicContentBlock
+				if text, err := openAIContentToText(msg.Content); err == nil && text != "" {
+					blocks = append(blocks, anthropicContentBlock{Type: "text", Text: text})
+				}
+				for _, tc := range msg.ToolCalls {
+					var input any
+					_ = json.Unmarshal([]byte(tc.Function.Arguments), &input)
+					blocks = append(blocks, anthropicContentBlock{
+						Type:  "tool_use",
+						ID:    tc.ID,
+						Name:  tc.Function.Name,
+						Input: input,
+					})
+				}
+				out.Messages = append(out.Messages, anthropicMessage{Role: "assistant", Content: blocks})
+			} else {
+				text, err := openAIContentToText(msg.Content)
+				if err != nil {
+					return anthropicMessagesRequest{}, err
+				}
+				out.Messages = append(out.Messages, anthropicMessage{
+					Role:    "assistant",
+					Content: []anthropicContentBlock{{Type: "text", Text: text}},
+				})
+			}
+
+		case "user":
+			text, err := openAIContentToText(msg.Content)
+			if err != nil {
+				return anthropicMessagesRequest{}, err
+			}
 			out.Messages = append(out.Messages, anthropicMessage{
-				Role: msg.Role,
-				Content: []anthropicContentBlock{
-					{Type: "text", Text: text},
-				},
+				Role:    "user",
+				Content: []anthropicContentBlock{{Type: "text", Text: text}},
 			})
+
+		case "tool":
+			content, _ := msg.Content.(string)
+			block := anthropicContentBlock{
+				Type:      "tool_result",
+				ToolUseID: msg.ToolCallID,
+				Content:   content,
+			}
+			// Coalesce consecutive tool results into a single Anthropic user message
+			// (required for parallel tool calls).
+			if n := len(out.Messages); n > 0 && out.Messages[n-1].Role == "user" && allToolResults(out.Messages[n-1].Content) {
+				out.Messages[n-1].Content = append(out.Messages[n-1].Content, block)
+			} else {
+				out.Messages = append(out.Messages, anthropicMessage{
+					Role:    "user",
+					Content: []anthropicContentBlock{block},
+				})
+			}
+
 		default:
 			return anthropicMessagesRequest{}, fmt.Errorf("unsupported message role: %s", msg.Role)
 		}
@@ -105,6 +154,18 @@ func toAnthropicRequest(in openAIChatCompletionRequest) (anthropicMessagesReques
 
 // mapToolChoice converts an OpenAI tool_choice value to its Anthropic equivalent.
 // Returns (toolChoice, omitTools, error). omitTools=true for "none".
+func allToolResults(blocks []anthropicContentBlock) bool {
+	if len(blocks) == 0 {
+		return false
+	}
+	for _, b := range blocks {
+		if b.Type != "tool_result" {
+			return false
+		}
+	}
+	return true
+}
+
 func mapToolChoice(v any) (*anthropicToolChoice, bool, error) {
 	if v == nil {
 		return nil, false, nil

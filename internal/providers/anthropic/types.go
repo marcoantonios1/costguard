@@ -25,8 +25,10 @@ type openAIToolFunction struct {
 }
 
 type openAIMessage struct {
-	Role    string `json:"role"`
-	Content any    `json:"content"`
+	Role       string           `json:"role"`
+	Content    any              `json:"content"`
+	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
 }
 
 type anthropicMessagesRequest struct {
@@ -65,12 +67,16 @@ type anthropicMessage struct {
 }
 
 type anthropicContentBlock struct {
-	Type  string `json:"type"`
-	Text  string `json:"text,omitempty"`
-	// tool_use fields
+	Type string `json:"type"`
+	// text block
+	Text string `json:"text,omitempty"`
+	// tool_use block
 	ID    string `json:"id,omitempty"`
 	Name  string `json:"name,omitempty"`
 	Input any    `json:"input,omitempty"`
+	// tool_result block
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	Content   string `json:"content,omitempty"`
 }
 
 type anthropicMessagesResponse struct {
