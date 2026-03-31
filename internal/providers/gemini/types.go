@@ -156,6 +156,13 @@ type openAIStreamChunk struct {
 	Created int64                `json:"created"`
 	Model   string               `json:"model"`
 	Choices []openAIStreamChoice `json:"choices"`
+	Usage   *openAIStreamUsage   `json:"usage,omitempty"`
+}
+
+type openAIStreamUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 type openAIStreamChoice struct {
