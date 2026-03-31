@@ -42,6 +42,7 @@ func (g *Gateway) meterStreamingUsage(r *http.Request, providerName, model strin
 	team := r.Header.Get("X-Costguard-Team")
 	project := r.Header.Get("X-Costguard-Project")
 	user := r.Header.Get("X-Costguard-User")
+	agent := r.Header.Get("X-Costguard-Agent")
 
 	usageData := metering.Usage{
 		Provider:         providerName,
@@ -62,6 +63,7 @@ func (g *Gateway) meterStreamingUsage(r *http.Request, providerName, model strin
 		"total_tokens":      totalTokens,
 		"streaming":         true,
 		"cache_hit":         false,
+		"agent":             agent,
 	}
 	if priceFound {
 		fields["estimated_cost_usd"] = cost
@@ -89,6 +91,7 @@ func (g *Gateway) meterStreamingUsage(r *http.Request, providerName, model strin
 			Team:             team,
 			Project:          project,
 			User:             user,
+			Agent:            agent,
 			Path:             r.URL.Path,
 			StatusCode:       http.StatusOK,
 		}

@@ -31,10 +31,11 @@ func (s *PostgresStore) Save(ctx context.Context, r Record) error {
 			team,
 			project,
 			user_name,
+			agent,
 			path,
 			status_code
 		) VALUES (
-			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
+			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
 		)
 	`,
 		r.RequestID,
@@ -50,6 +51,7 @@ func (s *PostgresStore) Save(ctx context.Context, r Record) error {
 		nullIfEmpty(r.Team),
 		nullIfEmpty(r.Project),
 		nullIfEmpty(r.User),
+		nullIfEmpty(r.Agent),
 		r.Path,
 		r.StatusCode,
 	)
@@ -226,6 +228,31 @@ func (s *PostgresStore) GetSpendForProject(ctx context.Context, project string, 
 	}
 
 	return total, nil
+}
+
+func (s *PostgresStore) GetSpendByAgent(ctx context.Context, from, to time.Time) ([]AgentSpend, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT COALESCE(agent, ''), COALESCE(SUM(estimated_cost_usd), 0)
+		FROM usage_records
+		WHERE timestamp_utc >= $1
+		  AND timestamp_utc < $2
+		GROUP BY agent
+		ORDER BY SUM(estimated_cost_usd) DESC
+	`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []AgentSpend
+	for rows.Next() {
+		var item AgentSpend
+		if err := rows.Scan(&item.Agent, &item.Spend); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }
 
 func nullIfEmpty(v string) any {

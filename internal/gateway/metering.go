@@ -32,6 +32,7 @@ func (g *Gateway) meterResponse(
 	team := r.Header.Get("X-Costguard-Team")
 	project := r.Header.Get("X-Costguard-Project")
 	user := r.Header.Get("X-Costguard-User")
+	agent := r.Header.Get("X-Costguard-Agent")
 
 	if cacheHit {
 		usageData := metering.Usage{
@@ -54,6 +55,7 @@ func (g *Gateway) meterResponse(
 			"total_tokens":       0,
 			"estimated_cost_usd": cost,
 			"cache_hit":          true,
+			"agent":              agent,
 		}
 		if !priceFound {
 			fields["price_found"] = false
@@ -78,6 +80,7 @@ func (g *Gateway) meterResponse(
 				Team:             team,
 				Project:          project,
 				User:             user,
+				Agent:            agent,
 				Path:             r.URL.Path,
 				StatusCode:       statusCode,
 			}
@@ -153,6 +156,7 @@ func (g *Gateway) meterResponse(
 		"completion_tokens": usageData.CompletionTokens,
 		"total_tokens":      usageData.TotalTokens,
 		"cache_hit":         false,
+		"agent":             agent,
 	}
 
 	if priceFound {
@@ -181,6 +185,7 @@ func (g *Gateway) meterResponse(
 			Team:             team,
 			Project:          project,
 			User:             user,
+			Agent:            agent,
 			Path:             r.URL.Path,
 			StatusCode:       statusCode,
 		}
