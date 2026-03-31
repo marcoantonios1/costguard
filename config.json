@@ -121,7 +121,7 @@
         "metadata": {
           "kind": "cloud",
           "supports_tools": true,
-          "supports_streaming": false,
+          "supports_streaming": true,
           "supports_vision": true,
           "supports_embeddings": false,
           "priority": 90,

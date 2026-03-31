@@ -22,10 +22,11 @@ type ClientConfig struct {
 }
 
 type Client struct {
-	name   string
-	base   *url.URL
-	apiKey string
-	hc     *http.Client
+	name     string
+	base     *url.URL
+	apiKey   string
+	hc       *http.Client
+	streamHC *http.Client // no timeout — streaming duration is unbounded
 }
 
 func NewClient(cfg ClientConfig) (*Client, error) {
@@ -49,10 +50,11 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	}
 
 	return &Client{
-		name:   cfg.Name,
-		base:   u,
-		apiKey: cfg.APIKey,
-		hc:     &http.Client{Timeout: to},
+		name:     cfg.Name,
+		base:     u,
+		apiKey:   cfg.APIKey,
+		hc:       &http.Client{Timeout: to},
+		streamHC: &http.Client{}, // no timeout; context handles cancellation
 	}, nil
 }
 
@@ -115,6 +117,10 @@ func (c *Client) doChatCompletions(ctx context.Context, req *http.Request) (*htt
 		)
 	}
 
+	if oaReq.Stream {
+		return c.doStreamingChatCompletions(ctx, req, oaReq, gemReq)
+	}
+
 	payload, err := json.Marshal(gemReq)
 	if err != nil {
 		return nil, err
@@ -163,6 +169,63 @@ func (c *Client) doChatCompletions(ctx context.Context, req *http.Request) (*htt
 	header.Set("Content-Type", "application/json")
 
 	return jsonResponseWithHeader(req, http.StatusOK, header, normalized)
+}
+
+func (c *Client) doStreamingChatCompletions(ctx context.Context, req *http.Request, oaReq openAIChatCompletionRequest, gemReq geminiGenerateContentRequest) (*http.Response, error) {
+	payload, err := json.Marshal(gemReq)
+	if err != nil {
+		return nil, err
+	}
+
+	upstreamURL := *c.base
+	upstreamURL.Path = joinURLPath(c.base.Path, fmt.Sprintf("/v1beta/models/%s:streamGenerateContent", oaReq.Model))
+	q := upstreamURL.Query()
+	q.Set("alt", "sse")
+	if c.apiKey != "" {
+		q.Set("key", c.apiKey)
+	}
+	upstreamURL.RawQuery = q.Encode()
+
+	upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL.String(), bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+
+	upstreamReq.Header = make(http.Header)
+	copyAllowedHeaders(req.Header, upstreamReq.Header)
+	upstreamReq.Header.Set("Content-Type", "application/json")
+	upstreamReq.Header.Set("Accept", "text/event-stream")
+
+	upstreamResp, err := c.streamHC.Do(upstreamReq)
+	if err != nil {
+		return nil, err
+	}
+
+	if upstreamResp.StatusCode < 200 || upstreamResp.StatusCode >= 300 {
+		defer upstreamResp.Body.Close()
+		respBody, _ := io.ReadAll(upstreamResp.Body)
+		return rawJSONResponse(req, upstreamResp.StatusCode, respBody), nil
+	}
+
+	pr, pw := io.Pipe()
+	go func() {
+		defer upstreamResp.Body.Close()
+		defer pw.Close()
+		translateGeminiStream(oaReq.Model, upstreamResp.Body, pw)
+	}()
+
+	header := make(http.Header)
+	header.Set("Content-Type", "text/event-stream")
+	header.Set("Cache-Control", "no-cache")
+	header.Set("Connection", "keep-alive")
+
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Status:     "200 OK",
+		Header:     header,
+		Body:       pr,
+		Request:    req,
+	}, nil
 }
 
 func copyAllowedHeaders(src, dst http.Header) {

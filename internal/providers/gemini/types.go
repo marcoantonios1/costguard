@@ -147,3 +147,37 @@ type openAIUsage struct {
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
 }
+
+// Streaming response types (OpenAI SSE format)
+
+type openAIStreamChunk struct {
+	ID      string               `json:"id"`
+	Object  string               `json:"object"`
+	Created int64                `json:"created"`
+	Model   string               `json:"model"`
+	Choices []openAIStreamChoice `json:"choices"`
+}
+
+type openAIStreamChoice struct {
+	Index        int               `json:"index"`
+	Delta        openAIStreamDelta `json:"delta"`
+	FinishReason *string           `json:"finish_reason"`
+}
+
+type openAIStreamDelta struct {
+	Role      string                 `json:"role,omitempty"`
+	Content   *string                `json:"content,omitempty"`
+	ToolCalls []openAIStreamToolCall `json:"tool_calls,omitempty"`
+}
+
+type openAIStreamToolCall struct {
+	Index    int                          `json:"index"`
+	ID       string                       `json:"id,omitempty"`
+	Type     string                       `json:"type,omitempty"`
+	Function openAIStreamToolCallFunction `json:"function"`
+}
+
+type openAIStreamToolCallFunction struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments"`
+}
