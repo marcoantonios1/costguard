@@ -1,8 +1,10 @@
 package gemini
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 )
@@ -302,6 +304,121 @@ func fallbackString(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// translateGeminiStream reads Gemini SSE events from r and writes
+// OpenAI-format SSE chunks to w, ending with "data: [DONE]".
+// Gemini streams bare "data: <json>" lines; each is a partial GenerateContentResponse.
+func translateGeminiStream(requestModel string, r io.Reader, w io.Writer) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+
+	id := fmt.Sprintf("chatcmpl-gemini-%d", time.Now().UnixNano())
+	created := time.Now().Unix()
+	model := requestModel
+	sentRole := false
+	toolCallIdx := 0
+
+	writeChunk := func(chunk openAIStreamChunk) {
+		b, _ := json.Marshal(chunk)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+	}
+
+	base := func() openAIStreamChunk {
+		return openAIStreamChunk{
+			ID:      id,
+			Object:  "chat.completion.chunk",
+			Created: created,
+			Model:   model,
+		}
+	}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+
+		var partial geminiGenerateContentResponse
+		if json.Unmarshal([]byte(data), &partial) != nil {
+			continue
+		}
+
+		if partial.ModelVersion != "" {
+			model = partial.ModelVersion
+		}
+
+		if len(partial.Candidates) == 0 {
+			continue
+		}
+
+		candidate := partial.Candidates[0]
+
+		// Emit role chunk once, before first content.
+		if !sentRole {
+			sentRole = true
+			role := "assistant"
+			chunk := base()
+			chunk.Choices = []openAIStreamChoice{{
+				Index:        0,
+				Delta:        openAIStreamDelta{Role: role},
+				FinishReason: nil,
+			}}
+			writeChunk(chunk)
+		}
+
+		// Emit content/tool-call parts.
+		for _, part := range candidate.Content.Parts {
+			if part.FunctionCall != nil {
+				args, _ := json.Marshal(part.FunctionCall.Args)
+				chunk := base()
+				chunk.Choices = []openAIStreamChoice{{
+					Index: 0,
+					Delta: openAIStreamDelta{
+						ToolCalls: []openAIStreamToolCall{{
+							Index: toolCallIdx,
+							ID:    "call_" + part.FunctionCall.Name,
+							Type:  "function",
+							Function: openAIStreamToolCallFunction{
+								Name:      part.FunctionCall.Name,
+								Arguments: string(args),
+							},
+						}},
+					},
+					FinishReason: nil,
+				}}
+				writeChunk(chunk)
+				toolCallIdx++
+			} else if strings.TrimSpace(part.Text) != "" {
+				text := part.Text
+				chunk := base()
+				chunk.Choices = []openAIStreamChoice{{
+					Index:        0,
+					Delta:        openAIStreamDelta{Content: &text},
+					FinishReason: nil,
+				}}
+				writeChunk(chunk)
+			}
+		}
+
+		// Emit finish chunk when Gemini signals the end.
+		if candidate.FinishReason != "" {
+			fr := normalizeFinishReason(candidate.FinishReason)
+			if toolCallIdx > 0 {
+				fr = "tool_calls"
+			}
+			chunk := base()
+			chunk.Choices = []openAIStreamChoice{{
+				Index:        0,
+				Delta:        openAIStreamDelta{},
+				FinishReason: &fr,
+			}}
+			writeChunk(chunk)
+		}
+	}
+
+	_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
 }
 
 func contentToText(v any) (string, error) {

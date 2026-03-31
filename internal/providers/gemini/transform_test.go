@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -287,6 +288,203 @@ func TestMultipleFunctionCallParts(t *testing.T) {
 	out := toOpenAIResponse("", in)
 	if len(out.Choices[0].Message.ToolCalls) != 2 {
 		t.Fatalf("expected 2 tool calls, got %d", len(out.Choices[0].Message.ToolCalls))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// translateGeminiStream
+// ---------------------------------------------------------------------------
+
+func geminiSSE(partials ...string) string {
+	var b strings.Builder
+	for _, p := range partials {
+		b.WriteString("data: ")
+		b.WriteString(p)
+		b.WriteString("\n\n")
+	}
+	return b.String()
+}
+
+func parseSSEChunks(t *testing.T, output string) []openAIStreamChunk {
+	t.Helper()
+	var chunks []openAIStreamChunk
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			continue
+		}
+		var chunk openAIStreamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			t.Fatalf("invalid SSE chunk JSON %q: %v", data, err)
+		}
+		chunks = append(chunks, chunk)
+	}
+	return chunks
+}
+
+func hasDone(output string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.TrimSpace(line) == "data: [DONE]" {
+			return true
+		}
+	}
+	return false
+}
+
+func TestTranslateGeminiStream_TextResponse(t *testing.T) {
+	input := geminiSSE(
+		`{"candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]},"index":0}]}`,
+		`{"candidates":[{"content":{"role":"model","parts":[{"text":" world"}]},"index":0}]}`,
+		`{"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"totalTokenCount":7},"modelVersion":"gemini-2.5-flash"}`,
+	)
+
+	var buf strings.Builder
+	translateGeminiStream("gemini-2.5-flash", strings.NewReader(input), &buf)
+	output := buf.String()
+
+	if !hasDone(output) {
+		t.Error("expected data: [DONE] at end")
+	}
+
+	chunks := parseSSEChunks(t, output)
+	if len(chunks) == 0 {
+		t.Fatal("expected at least one chunk")
+	}
+
+	// First chunk: role
+	if chunks[0].Choices[0].Delta.Role != "assistant" {
+		t.Errorf("first chunk role: got %q, want assistant", chunks[0].Choices[0].Delta.Role)
+	}
+
+	// Collect text
+	var text string
+	for _, ch := range chunks {
+		if ch.Choices[0].Delta.Content != nil {
+			text += *ch.Choices[0].Delta.Content
+		}
+	}
+	if text != "Hello world" {
+		t.Errorf("accumulated text: got %q, want %q", text, "Hello world")
+	}
+
+	// Last chunk: finish_reason=stop
+	last := chunks[len(chunks)-1]
+	if last.Choices[0].FinishReason == nil || *last.Choices[0].FinishReason != "stop" {
+		t.Errorf("finish_reason: got %v, want stop", last.Choices[0].FinishReason)
+	}
+}
+
+func TestTranslateGeminiStream_ModelFromChunk(t *testing.T) {
+	input := geminiSSE(
+		`{"candidates":[{"content":{"role":"model","parts":[{"text":"hi"}]},"finishReason":"STOP","index":0}],"modelVersion":"gemini-2.5-flash-001"}`,
+	)
+
+	var buf strings.Builder
+	translateGeminiStream("fallback-model", strings.NewReader(input), &buf)
+	chunks := parseSSEChunks(t, buf.String())
+
+	if len(chunks) == 0 {
+		t.Fatal("expected at least one chunk")
+	}
+	for _, ch := range chunks {
+		if ch.Model != "gemini-2.5-flash-001" {
+			t.Errorf("model: got %q, want gemini-2.5-flash-001", ch.Model)
+		}
+	}
+}
+
+func TestTranslateGeminiStream_ToolCall(t *testing.T) {
+	input := geminiSSE(
+		`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"get_weather","args":{"location":"London"}}}]},"finishReason":"STOP","index":0}]}`,
+	)
+
+	var buf strings.Builder
+	translateGeminiStream("gemini-2.5-flash", strings.NewReader(input), &buf)
+	output := buf.String()
+
+	if !hasDone(output) {
+		t.Error("expected data: [DONE] at end")
+	}
+
+	chunks := parseSSEChunks(t, output)
+
+	// Find tool call chunk
+	var tcChunk *openAIStreamChunk
+	for i, ch := range chunks {
+		if len(ch.Choices[0].Delta.ToolCalls) > 0 {
+			tcChunk = &chunks[i]
+			break
+		}
+	}
+	if tcChunk == nil {
+		t.Fatal("no tool call chunk found")
+	}
+	tc := tcChunk.Choices[0].Delta.ToolCalls[0]
+	if tc.Index != 0 {
+		t.Errorf("tool call index: got %d, want 0", tc.Index)
+	}
+	if tc.ID != "call_get_weather" {
+		t.Errorf("tool call id: got %q, want call_get_weather", tc.ID)
+	}
+	if tc.Type != "function" {
+		t.Errorf("tool call type: got %q, want function", tc.Type)
+	}
+	if tc.Function.Name != "get_weather" {
+		t.Errorf("function name: got %q, want get_weather", tc.Function.Name)
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+		t.Fatalf("arguments not valid JSON: %v", err)
+	}
+	if args["location"] != "London" {
+		t.Errorf("args location: %v", args["location"])
+	}
+
+	// Finish reason should be tool_calls
+	last := chunks[len(chunks)-1]
+	if last.Choices[0].FinishReason == nil || *last.Choices[0].FinishReason != "tool_calls" {
+		t.Errorf("finish_reason: got %v, want tool_calls", last.Choices[0].FinishReason)
+	}
+}
+
+func TestTranslateGeminiStream_ParallelToolCalls(t *testing.T) {
+	input := geminiSSE(
+		`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"fn_a","args":{}}},{"functionCall":{"name":"fn_b","args":{}}}]},"finishReason":"STOP","index":0}]}`,
+	)
+
+	var buf strings.Builder
+	translateGeminiStream("gemini-2.5-flash", strings.NewReader(input), &buf)
+	chunks := parseSSEChunks(t, buf.String())
+
+	toolIndices := map[int]string{}
+	for _, ch := range chunks {
+		for _, tc := range ch.Choices[0].Delta.ToolCalls {
+			if tc.ID != "" {
+				toolIndices[tc.Index] = tc.ID
+			}
+		}
+	}
+	if toolIndices[0] != "call_fn_a" {
+		t.Errorf("tool index 0: got %q, want call_fn_a", toolIndices[0])
+	}
+	if toolIndices[1] != "call_fn_b" {
+		t.Errorf("tool index 1: got %q, want call_fn_b", toolIndices[1])
+	}
+}
+
+func TestTranslateGeminiStream_AlwaysEndsDone(t *testing.T) {
+	// Even if upstream closes with no finishReason, [DONE] must be sent.
+	input := geminiSSE(`{"candidates":[{"content":{"role":"model","parts":[{"text":"hi"}]},"index":0}]}`)
+
+	var buf strings.Builder
+	translateGeminiStream("gemini-2.5-flash", strings.NewReader(input), &buf)
+
+	if !hasDone(buf.String()) {
+		t.Error("expected data: [DONE] even without finishReason chunk")
 	}
 }
 
