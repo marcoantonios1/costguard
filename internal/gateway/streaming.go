@@ -1,11 +1,7 @@
 package gateway
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -19,70 +15,20 @@ func isStreamingResponse(resp *http.Response) bool {
 	return strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
 }
 
-// passthroughStreaming returns the response immediately with its body replaced
-// by a pipe. A goroutine forwards the upstream SSE stream through the pipe,
-// scanning each chunk for usage data. After the stream ends the goroutine
-// calls meterStreamingUsage asynchronously.
+// passthroughStreaming wraps the response body in a StreamMeter and returns
+// immediately. The StreamMeter inspects SSE chunks as the handler reads
+// through them, then fires meterStreamingUsage in a goroutine once the
+// stream ends — no extra goroutine or pipe needed for data forwarding.
 func (g *Gateway) passthroughStreaming(r *http.Request, resp *http.Response, providerName, model string) *http.Response {
-	pr, pw := io.Pipe()
-
-	go func() {
-		defer resp.Body.Close()
-		defer pw.Close()
-
-		scanner := bufio.NewScanner(resp.Body)
-		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-
-		var (
-			finalModel       = model
-			promptTokens     int
-			completionTokens int
-			totalTokens      int
-		)
-
-		for scanner.Scan() {
-			line := scanner.Text()
-			// Write the line plus the newline the scanner stripped.
-			if _, err := fmt.Fprintf(pw, "%s\n", line); err != nil {
-				return // client disconnected
-			}
-
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-			data := strings.TrimPrefix(line, "data: ")
-			if data == "[DONE]" {
-				continue
-			}
-
-			var chunk struct {
-				Model string `json:"model"`
-				Usage *struct {
-					PromptTokens     int `json:"prompt_tokens"`
-					CompletionTokens int `json:"completion_tokens"`
-					TotalTokens      int `json:"total_tokens"`
-				} `json:"usage"`
-			}
-			if json.Unmarshal([]byte(data), &chunk) == nil {
-				if chunk.Model != "" {
-					finalModel = chunk.Model
-				}
-				if chunk.Usage != nil && chunk.Usage.TotalTokens > 0 {
-					promptTokens = chunk.Usage.PromptTokens
-					completionTokens = chunk.Usage.CompletionTokens
-					totalTokens = chunk.Usage.TotalTokens
-				}
-			}
-		}
-
-		g.meterStreamingUsage(r, providerName, finalModel, promptTokens, completionTokens, totalTokens)
-	}()
+	meter := newStreamMeter(resp.Body, model, func(finalModel string, prompt, completion, total int) {
+		go g.meterStreamingUsage(r, providerName, finalModel, prompt, completion, total)
+	})
 
 	return &http.Response{
 		StatusCode: resp.StatusCode,
 		Status:     resp.Status,
 		Header:     resp.Header.Clone(),
-		Body:       pr,
+		Body:       meter,
 		Request:    r,
 	}
 }
