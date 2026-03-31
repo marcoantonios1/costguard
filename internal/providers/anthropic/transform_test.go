@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -368,6 +369,278 @@ func TestParallelToolResultsCoalescedIntoSingleUserMessage(t *testing.T) {
 	}
 	if resultMsg.Content[0].ToolUseID != "tc_1" || resultMsg.Content[1].ToolUseID != "tc_2" {
 		t.Errorf("tool_use_ids: %q %q", resultMsg.Content[0].ToolUseID, resultMsg.Content[1].ToolUseID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// streaming: toAnthropicRequest
+// ---------------------------------------------------------------------------
+
+func TestStreamRequestSetsStreamTrue(t *testing.T) {
+	raw := `{"model":"claude-3-5-sonnet-20241022","messages":[{"role":"user","content":"hi"}],"stream":true}`
+	out, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !out.Stream {
+		t.Error("expected Stream=true in anthropic request")
+	}
+}
+
+func TestNonStreamRequestSetsStreamFalse(t *testing.T) {
+	raw := `{"model":"claude-3-5-sonnet-20241022","messages":[{"role":"user","content":"hi"}]}`
+	out, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Stream {
+		t.Error("expected Stream=false in anthropic request")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// streaming: translateAnthropicStream
+// ---------------------------------------------------------------------------
+
+func sseInput(lines ...string) string {
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func parseSSEChunks(t *testing.T, output string) []openAIStreamChunk {
+	t.Helper()
+	var chunks []openAIStreamChunk
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			continue
+		}
+		var chunk openAIStreamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			t.Fatalf("invalid SSE chunk JSON %q: %v", data, err)
+		}
+		chunks = append(chunks, chunk)
+	}
+	return chunks
+}
+
+func hasDone(output string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.TrimSpace(line) == "data: [DONE]" {
+			return true
+		}
+	}
+	return false
+}
+
+func TestTranslateStream_TextResponse(t *testing.T) {
+	input := sseInput(
+		"event: message_start",
+		`data: {"type":"message_start","message":{"id":"msg_01","model":"claude-3-5-sonnet-20241022"}}`,
+		"",
+		"event: content_block_start",
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}`,
+		"",
+		"event: content_block_stop",
+		`data: {"type":"content_block_stop","index":0}`,
+		"",
+		"event: message_delta",
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
+		"",
+		"event: message_stop",
+		`data: {"type":"message_stop"}`,
+	)
+
+	var buf strings.Builder
+	translateAnthropicStream("claude-3-5-sonnet-20241022", strings.NewReader(input), &buf)
+	output := buf.String()
+
+	if !hasDone(output) {
+		t.Error("expected data: [DONE] at end")
+	}
+
+	chunks := parseSSEChunks(t, output)
+	if len(chunks) == 0 {
+		t.Fatal("expected at least one chunk")
+	}
+
+	// First chunk: role
+	if chunks[0].Choices[0].Delta.Role != "assistant" {
+		t.Errorf("first chunk role: got %q, want assistant", chunks[0].Choices[0].Delta.Role)
+	}
+	if chunks[0].ID != "msg_01" {
+		t.Errorf("chunk id: got %q, want msg_01", chunks[0].ID)
+	}
+
+	// Find text chunks
+	var texts []string
+	for _, ch := range chunks {
+		if ch.Choices[0].Delta.Content != nil {
+			texts = append(texts, *ch.Choices[0].Delta.Content)
+		}
+	}
+	if strings.Join(texts, "") != "Hello world" {
+		t.Errorf("text content: got %q, want %q", strings.Join(texts, ""), "Hello world")
+	}
+
+	// Last chunk before DONE: finish_reason=stop
+	last := chunks[len(chunks)-1]
+	if last.Choices[0].FinishReason == nil || *last.Choices[0].FinishReason != "stop" {
+		t.Errorf("finish_reason: got %v, want stop", last.Choices[0].FinishReason)
+	}
+}
+
+func TestTranslateStream_ToolUse(t *testing.T) {
+	input := sseInput(
+		"event: message_start",
+		`data: {"type":"message_start","message":{"id":"msg_02","model":"claude-3-5-sonnet-20241022"}}`,
+		"",
+		"event: content_block_start",
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_01","name":"get_weather","input":{}}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"location\":"}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"London\"}"}}`,
+		"",
+		"event: content_block_stop",
+		`data: {"type":"content_block_stop","index":0}`,
+		"",
+		"event: message_delta",
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
+		"",
+		"event: message_stop",
+		`data: {"type":"message_stop"}`,
+	)
+
+	var buf strings.Builder
+	translateAnthropicStream("claude-3-5-sonnet-20241022", strings.NewReader(input), &buf)
+	output := buf.String()
+
+	if !hasDone(output) {
+		t.Error("expected data: [DONE] at end")
+	}
+
+	chunks := parseSSEChunks(t, output)
+
+	// Find the tool call start chunk (has id+name)
+	var startChunk *openAIStreamChunk
+	for i, ch := range chunks {
+		if len(ch.Choices[0].Delta.ToolCalls) > 0 && ch.Choices[0].Delta.ToolCalls[0].ID != "" {
+			startChunk = &chunks[i]
+			break
+		}
+	}
+	if startChunk == nil {
+		t.Fatal("no tool call start chunk found")
+	}
+	tc := startChunk.Choices[0].Delta.ToolCalls[0]
+	if tc.ID != "toolu_01" {
+		t.Errorf("tool call id: got %q, want toolu_01", tc.ID)
+	}
+	if tc.Type != "function" {
+		t.Errorf("tool call type: got %q, want function", tc.Type)
+	}
+	if tc.Function.Name != "get_weather" {
+		t.Errorf("tool call name: got %q, want get_weather", tc.Function.Name)
+	}
+
+	// Collect argument deltas
+	var args string
+	for _, ch := range chunks {
+		if len(ch.Choices[0].Delta.ToolCalls) > 0 {
+			args += ch.Choices[0].Delta.ToolCalls[0].Function.Arguments
+		}
+	}
+	if !strings.Contains(args, "London") {
+		t.Errorf("accumulated arguments %q do not contain expected content", args)
+	}
+
+	// Finish reason
+	last := chunks[len(chunks)-1]
+	if last.Choices[0].FinishReason == nil || *last.Choices[0].FinishReason != "tool_calls" {
+		t.Errorf("finish_reason: got %v, want tool_calls", last.Choices[0].FinishReason)
+	}
+}
+
+func TestTranslateStream_ParallelToolCalls(t *testing.T) {
+	input := sseInput(
+		"event: message_start",
+		`data: {"type":"message_start","message":{"id":"msg_03","model":"claude-3-5-sonnet-20241022"}}`,
+		"",
+		"event: content_block_start",
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_a","name":"fn_a","input":{}}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}}`,
+		"",
+		"event: content_block_stop",
+		`data: {"type":"content_block_stop","index":0}`,
+		"",
+		"event: content_block_start",
+		`data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_b","name":"fn_b","input":{}}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{}"}}`,
+		"",
+		"event: content_block_stop",
+		`data: {"type":"content_block_stop","index":1}`,
+		"",
+		"event: message_delta",
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
+		"",
+		"event: message_stop",
+		`data: {"type":"message_stop"}`,
+	)
+
+	var buf strings.Builder
+	translateAnthropicStream("claude-3-5-sonnet-20241022", strings.NewReader(input), &buf)
+	chunks := parseSSEChunks(t, buf.String())
+
+	toolIndices := map[int]string{} // tool_calls array index → id
+	for _, ch := range chunks {
+		for _, tc := range ch.Choices[0].Delta.ToolCalls {
+			if tc.ID != "" {
+				toolIndices[tc.Index] = tc.ID
+			}
+		}
+	}
+	if toolIndices[0] != "toolu_a" {
+		t.Errorf("tool index 0: got %q, want toolu_a", toolIndices[0])
+	}
+	if toolIndices[1] != "toolu_b" {
+		t.Errorf("tool index 1: got %q, want toolu_b", toolIndices[1])
+	}
+}
+
+func TestTranslateStream_ModelFromMessageStart(t *testing.T) {
+	input := sseInput(
+		"event: message_start",
+		`data: {"type":"message_start","message":{"id":"msg_04","model":"claude-3-opus-20240229"}}`,
+		"",
+		"event: message_stop",
+		`data: {"type":"message_stop"}`,
+	)
+
+	var buf strings.Builder
+	translateAnthropicStream("fallback-model", strings.NewReader(input), &buf)
+	chunks := parseSSEChunks(t, buf.String())
+
+	if len(chunks) == 0 {
+		t.Fatal("expected at least one chunk")
+	}
+	if chunks[0].Model != "claude-3-opus-20240229" {
+		t.Errorf("model: got %q, want claude-3-opus-20240229", chunks[0].Model)
 	}
 }
 
