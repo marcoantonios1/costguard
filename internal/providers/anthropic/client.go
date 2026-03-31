@@ -28,6 +28,7 @@ type Client struct {
 	apiKey           string
 	anthropicVersion string
 	hc               *http.Client
+	streamHC         *http.Client // no timeout — streaming duration is unbounded
 }
 
 func NewClient(cfg ClientConfig) (*Client, error) {
@@ -61,6 +62,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		apiKey:           cfg.APIKey,
 		anthropicVersion: version,
 		hc:               &http.Client{Timeout: to},
+		streamHC:         &http.Client{}, // no timeout; context handles cancellation
 	}, nil
 }
 
@@ -123,6 +125,10 @@ func (c *Client) doChatCompletions(ctx context.Context, req *http.Request) (*htt
 		)
 	}
 
+	if oaReq.Stream {
+		return c.doStreamingChatCompletions(ctx, req, oaReq, anthReq)
+	}
+
 	payload, err := json.Marshal(anthReq)
 	if err != nil {
 		return nil, err
@@ -177,6 +183,68 @@ func (c *Client) doChatCompletions(ctx context.Context, req *http.Request) (*htt
 	}
 
 	return jsonResponseWithHeader(req, http.StatusOK, header, normalized)
+}
+
+func (c *Client) doStreamingChatCompletions(ctx context.Context, req *http.Request, oaReq openAIChatCompletionRequest, anthReq anthropicMessagesRequest) (*http.Response, error) {
+	payload, err := json.Marshal(anthReq)
+	if err != nil {
+		return nil, err
+	}
+
+	upstreamURL := *c.base
+	upstreamURL.Path = joinURLPath(c.base.Path, "/v1/messages")
+
+	upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL.String(), bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+
+	upstreamReq.Header = make(http.Header)
+	copyAllowedHeaders(req.Header, upstreamReq.Header)
+
+	upstreamReq.Header.Set("Content-Type", "application/json")
+	upstreamReq.Header.Set("Accept", "text/event-stream")
+	if c.apiKey != "" {
+		upstreamReq.Header.Set("x-api-key", c.apiKey)
+	}
+	if c.anthropicVersion != "" {
+		upstreamReq.Header.Set("anthropic-version", c.anthropicVersion)
+	}
+
+	upstreamResp, err := c.streamHC.Do(upstreamReq)
+	if err != nil {
+		return nil, err
+	}
+
+	if upstreamResp.StatusCode < 200 || upstreamResp.StatusCode >= 300 {
+		defer upstreamResp.Body.Close()
+		respBody, _ := io.ReadAll(upstreamResp.Body)
+		return rawJSONResponse(req, upstreamResp.StatusCode, upstreamResp.Header, respBody), nil
+	}
+
+	pr, pw := io.Pipe()
+	go func() {
+		defer upstreamResp.Body.Close()
+		defer pw.Close()
+		translateAnthropicStream(oaReq.Model, upstreamResp.Body, pw)
+	}()
+
+	header := make(http.Header)
+	header.Set("Content-Type", "text/event-stream")
+	header.Set("Cache-Control", "no-cache")
+	header.Set("Connection", "keep-alive")
+
+	if orgID := upstreamResp.Header.Get("anthropic-organization-id"); orgID != "" {
+		header.Set("anthropic-organization-id", orgID)
+	}
+
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Status:     "200 OK",
+		Header:     header,
+		Body:       pr,
+		Request:    req,
+	}, nil
 }
 
 func copyAllowedHeaders(src, dst http.Header) {

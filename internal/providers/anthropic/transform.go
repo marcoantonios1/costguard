@@ -1,8 +1,10 @@
 package anthropic
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 )
@@ -14,14 +16,10 @@ func toAnthropicRequest(in openAIChatCompletionRequest) (anthropicMessagesReques
 	if len(in.Messages) == 0 {
 		return anthropicMessagesRequest{}, fmt.Errorf("messages is required")
 	}
-	if in.Stream {
-		return anthropicMessagesRequest{}, fmt.Errorf("stream is not supported by the anthropic adapter yet")
-	}
-
 	out := anthropicMessagesRequest{
 		Model:     in.Model,
 		MaxTokens: in.MaxTokens,
-		Stream:    false,
+		Stream:    in.Stream,
 	}
 
 	if out.MaxTokens <= 0 {
@@ -331,4 +329,171 @@ func mapStopReason(v string) string {
 	default:
 		return "stop"
 	}
+}
+
+// translateAnthropicStream reads Anthropic SSE events from r and writes
+// OpenAI-format SSE chunks to w, ending with "data: [DONE]".
+func translateAnthropicStream(requestModel string, r io.Reader, w io.Writer) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+
+	var (
+		messageID   string
+		model       = requestModel
+		created     = time.Now().Unix()
+		blockTypes  = map[int]string{} // content block index → "text" | "tool_use"
+		toolCallIdx = map[int]int{}    // content block index → tool_calls array index
+		nextToolIdx = 0
+		eventType   string
+	)
+
+	writeChunk := func(chunk openAIStreamChunk) {
+		b, _ := json.Marshal(chunk)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+	}
+
+	base := func() openAIStreamChunk {
+		return openAIStreamChunk{
+			ID:      messageID,
+			Object:  "chat.completion.chunk",
+			Created: created,
+			Model:   model,
+		}
+	}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if strings.HasPrefix(line, "event: ") {
+			eventType = strings.TrimPrefix(line, "event: ")
+			continue
+		}
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+
+		switch eventType {
+		case "message_start":
+			var e struct {
+				Message struct {
+					ID    string `json:"id"`
+					Model string `json:"model"`
+				} `json:"message"`
+			}
+			if json.Unmarshal([]byte(data), &e) != nil {
+				continue
+			}
+			messageID = e.Message.ID
+			if e.Message.Model != "" {
+				model = e.Message.Model
+			}
+			chunk := base()
+			role := "assistant"
+			chunk.Choices = []openAIStreamChoice{{
+				Index:        0,
+				Delta:        openAIStreamDelta{Role: role},
+				FinishReason: nil,
+			}}
+			writeChunk(chunk)
+
+		case "content_block_start":
+			var e struct {
+				Index        int `json:"index"`
+				ContentBlock struct {
+					Type string `json:"type"`
+					ID   string `json:"id"`
+					Name string `json:"name"`
+				} `json:"content_block"`
+			}
+			if json.Unmarshal([]byte(data), &e) != nil {
+				continue
+			}
+			blockTypes[e.Index] = e.ContentBlock.Type
+			if e.ContentBlock.Type == "tool_use" {
+				tcIdx := nextToolIdx
+				toolCallIdx[e.Index] = tcIdx
+				nextToolIdx++
+				chunk := base()
+				chunk.Choices = []openAIStreamChoice{{
+					Index: 0,
+					Delta: openAIStreamDelta{
+						ToolCalls: []openAIStreamToolCall{{
+							Index: tcIdx,
+							ID:    e.ContentBlock.ID,
+							Type:  "function",
+							Function: openAIStreamToolCallFunction{
+								Name:      e.ContentBlock.Name,
+								Arguments: "",
+							},
+						}},
+					},
+					FinishReason: nil,
+				}}
+				writeChunk(chunk)
+			}
+
+		case "content_block_delta":
+			var e struct {
+				Index int `json:"index"`
+				Delta struct {
+					Type        string `json:"type"`
+					Text        string `json:"text"`
+					PartialJSON string `json:"partial_json"`
+				} `json:"delta"`
+			}
+			if json.Unmarshal([]byte(data), &e) != nil {
+				continue
+			}
+			chunk := base()
+			switch e.Delta.Type {
+			case "text_delta":
+				text := e.Delta.Text
+				chunk.Choices = []openAIStreamChoice{{
+					Index:        0,
+					Delta:        openAIStreamDelta{Content: &text},
+					FinishReason: nil,
+				}}
+				writeChunk(chunk)
+			case "input_json_delta":
+				tcIdx := toolCallIdx[e.Index]
+				chunk.Choices = []openAIStreamChoice{{
+					Index: 0,
+					Delta: openAIStreamDelta{
+						ToolCalls: []openAIStreamToolCall{{
+							Index: tcIdx,
+							Function: openAIStreamToolCallFunction{
+								Arguments: e.Delta.PartialJSON,
+							},
+						}},
+					},
+					FinishReason: nil,
+				}}
+				writeChunk(chunk)
+			}
+
+		case "message_delta":
+			var e struct {
+				Delta struct {
+					StopReason string `json:"stop_reason"`
+				} `json:"delta"`
+			}
+			if json.Unmarshal([]byte(data), &e) != nil {
+				continue
+			}
+			fr := mapStopReason(e.Delta.StopReason)
+			chunk := base()
+			chunk.Choices = []openAIStreamChoice{{
+				Index:        0,
+				Delta:        openAIStreamDelta{},
+				FinishReason: &fr,
+			}}
+			writeChunk(chunk)
+
+		case "message_stop":
+			_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
+		}
+	}
+
+	_ = blockTypes // used for future block-type-aware logic
 }
