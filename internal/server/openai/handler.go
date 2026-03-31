@@ -3,6 +3,7 @@ package openai
 import (
 	"io"
 	"net/http"
+	"strings"
 )
 
 type handler struct {
@@ -41,6 +42,25 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(upstreamResp.StatusCode)
+
+	if strings.Contains(upstreamResp.Header.Get("Content-Type"), "text/event-stream") {
+		flusher, canFlush := w.(http.Flusher)
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := upstreamResp.Body.Read(buf)
+			if n > 0 {
+				_, _ = w.Write(buf[:n])
+				if canFlush {
+					flusher.Flush()
+				}
+			}
+			if readErr != nil {
+				break
+			}
+		}
+		return
+	}
+
 	_, _ = io.Copy(w, upstreamResp.Body)
 }
 

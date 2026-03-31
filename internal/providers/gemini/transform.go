@@ -414,6 +414,13 @@ func translateGeminiStream(requestModel string, r io.Reader, w io.Writer) {
 				Delta:        openAIStreamDelta{},
 				FinishReason: &fr,
 			}}
+			if partial.UsageMetadata.TotalTokenCount > 0 {
+				chunk.Usage = &openAIStreamUsage{
+					PromptTokens:     partial.UsageMetadata.PromptTokenCount,
+					CompletionTokens: partial.UsageMetadata.CandidatesTokenCount,
+					TotalTokens:      partial.UsageMetadata.TotalTokenCount,
+				}
+			}
 			writeChunk(chunk)
 		}
 	}

@@ -338,13 +338,15 @@ func translateAnthropicStream(requestModel string, r io.Reader, w io.Writer) {
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
 	var (
-		messageID   string
-		model       = requestModel
-		created     = time.Now().Unix()
-		blockTypes  = map[int]string{} // content block index → "text" | "tool_use"
-		toolCallIdx = map[int]int{}    // content block index → tool_calls array index
-		nextToolIdx = 0
-		eventType   string
+		messageID        string
+		model            = requestModel
+		created          = time.Now().Unix()
+		blockTypes       = map[int]string{} // content block index → "text" | "tool_use"
+		toolCallIdx      = map[int]int{}    // content block index → tool_calls array index
+		nextToolIdx      = 0
+		eventType        string
+		inputTokens      int
+		outputTokens     int
 	)
 
 	writeChunk := func(chunk openAIStreamChunk) {
@@ -379,6 +381,9 @@ func translateAnthropicStream(requestModel string, r io.Reader, w io.Writer) {
 				Message struct {
 					ID    string `json:"id"`
 					Model string `json:"model"`
+					Usage struct {
+						InputTokens int `json:"input_tokens"`
+					} `json:"usage"`
 				} `json:"message"`
 			}
 			if json.Unmarshal([]byte(data), &e) != nil {
@@ -388,6 +393,7 @@ func translateAnthropicStream(requestModel string, r io.Reader, w io.Writer) {
 			if e.Message.Model != "" {
 				model = e.Message.Model
 			}
+			inputTokens = e.Message.Usage.InputTokens
 			chunk := base()
 			role := "assistant"
 			chunk.Choices = []openAIStreamChoice{{
@@ -477,17 +483,27 @@ func translateAnthropicStream(requestModel string, r io.Reader, w io.Writer) {
 				Delta struct {
 					StopReason string `json:"stop_reason"`
 				} `json:"delta"`
+				Usage struct {
+					OutputTokens int `json:"output_tokens"`
+				} `json:"usage"`
 			}
 			if json.Unmarshal([]byte(data), &e) != nil {
 				continue
 			}
+			outputTokens = e.Usage.OutputTokens
 			fr := mapStopReason(e.Delta.StopReason)
+			total := inputTokens + outputTokens
 			chunk := base()
 			chunk.Choices = []openAIStreamChoice{{
 				Index:        0,
 				Delta:        openAIStreamDelta{},
 				FinishReason: &fr,
 			}}
+			chunk.Usage = &openAIStreamUsage{
+				PromptTokens:     inputTokens,
+				CompletionTokens: outputTokens,
+				TotalTokens:      total,
+			}
 			writeChunk(chunk)
 
 		case "message_stop":
