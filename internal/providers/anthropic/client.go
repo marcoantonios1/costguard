@@ -250,7 +250,7 @@ func (c *Client) doStreamingChatCompletions(ctx context.Context, req *http.Reque
 func copyAllowedHeaders(src, dst http.Header) {
 	for k, vv := range src {
 		switch http.CanonicalHeaderKey(k) {
-		case "X-Request-Id", "X-Costguard-Team", "X-Costguard-Project", "X-Costguard-User":
+		case "X-Request-Id", "X-Costguard-Team", "X-Costguard-Project", "X-Costguard-User", "X-Costguard-Agent":
 			for _, v := range vv {
 				dst.Add(k, v)
 			}

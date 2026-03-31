@@ -68,6 +68,25 @@ func (h *AdminHandler) UsageProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, data)
 }
 
+func (h *AdminHandler) UsageAgents(w http.ResponseWriter, r *http.Request) {
+	from, to, err := parseRange(r)
+	if err != nil {
+		from, to = currentMonthRange()
+	}
+
+	items, err := h.usageStore.GetSpendByAgent(r.Context(), from, to)
+	if err != nil {
+		http.Error(w, "failed to load agent usage", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"from":   from,
+		"to":     to,
+		"agents": items,
+	})
+}
+
 func currentMonthRange() (time.Time, time.Time) {
 	now := time.Now().UTC()
 	from := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)

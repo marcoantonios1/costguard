@@ -16,6 +16,7 @@ type Record struct {
 	Team             string
 	Project          string
 	User             string
+	Agent            string
 	Path             string
 	StatusCode       int
 }
@@ -38,6 +39,11 @@ type ModelSpend struct {
 type ProviderSpend struct {
 	Provider string  `json:"provider"`
 	Spend    float64 `json:"spend_usd"`
+}
+
+type AgentSpend struct {
+	Agent string  `json:"agent"`
+	Spend float64 `json:"spend_usd"`
 }
 
 type Summary struct {
