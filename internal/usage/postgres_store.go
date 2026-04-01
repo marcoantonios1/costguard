@@ -230,6 +230,23 @@ func (s *PostgresStore) GetSpendForProject(ctx context.Context, project string, 
 	return total, nil
 }
 
+func (s *PostgresStore) GetSpendForAgent(ctx context.Context, agent string, from, to time.Time) (float64, error) {
+	var total float64
+
+	err := s.db.QueryRow(ctx, `
+		SELECT COALESCE(SUM(estimated_cost_usd), 0)
+		FROM usage_records
+		WHERE timestamp_utc >= $1
+		  AND timestamp_utc < $2
+		  AND agent = $3
+	`, from, to, agent).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+
+	return total, nil
+}
+
 func (s *PostgresStore) GetSpendByAgent(ctx context.Context, from, to time.Time) ([]AgentSpend, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT COALESCE(agent, ''), COALESCE(SUM(estimated_cost_usd), 0)

@@ -224,8 +224,9 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 		now := time.Now()
 		team := r.Header.Get("X-Costguard-Team")
 		project := r.Header.Get("X-Costguard-Project")
+		agent := r.Header.Get("X-Costguard-Agent")
 
-		if err := g.budgetChecker.CheckRequestBudget(r.Context(), now, team, project); err != nil {
+		if err := g.budgetChecker.CheckRequestBudget(r.Context(), now, team, project, agent); err != nil {
 			if errors.Is(err, budget.ErrMonthlyBudgetExceeded) {
 				g.emitMonthlyBudgetAlertOnce(r.Context(), now, 100)
 
@@ -278,6 +279,26 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 					r,
 					http.StatusPaymentRequired,
 					"project monthly budget exceeded",
+				), nil
+			}
+
+			if errors.Is(err, budget.ErrAgentBudgetExceeded) {
+				g.emitAgentBudgetAlertOnce(r.Context(), now, agent)
+
+				if g.log != nil {
+					g.log.Error("agent_budget_exceeded", map[string]any{
+						"request_id": server.RequestIDFromContext(r.Context()),
+						"path":       r.URL.Path,
+						"agent":      agent,
+						"model":      effectiveModel,
+						"provider":   providerName,
+					})
+				}
+
+				return newJSONErrorResponse(
+					r,
+					http.StatusPaymentRequired,
+					"agent monthly budget exceeded",
 				), nil
 			}
 

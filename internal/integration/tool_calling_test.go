@@ -79,6 +79,9 @@ func (s *fakeStore) GetSpendForTeam(_ context.Context, _ string, _, _ time.Time)
 func (s *fakeStore) GetSpendForProject(_ context.Context, _ string, _, _ time.Time) (float64, error) {
 	return 0, nil
 }
+func (s *fakeStore) GetSpendForAgent(_ context.Context, _ string, _, _ time.Time) (float64, error) {
+	return 0, nil
+}
 func (s *fakeStore) GetSpendByAgent(_ context.Context, _, _ time.Time) ([]usage.AgentSpend, error) {
 	return nil, nil
 }
