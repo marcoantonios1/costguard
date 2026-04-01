@@ -224,6 +224,106 @@ func TestParallelToolResultsCoalesced(t *testing.T) {
 	}
 }
 
+func TestFullToolCallingCycleGemini(t *testing.T) {
+	// Full loop: user → model (functionCall) → tool result → user follow-up
+	raw := `{
+		"model": "gemini-2.5-flash",
+		"messages": [
+			{"role": "user", "content": "What is the weather in London?"},
+			{"role": "assistant", "content": null, "tool_calls": [
+				{"id": "call_gw", "type": "function", "function": {"name": "get_weather", "arguments": "{\"location\":\"London\"}"}}
+			]},
+			{"role": "tool", "tool_call_id": "call_gw", "content": "15°C and cloudy"},
+			{"role": "user", "content": "Thanks!"}
+		]
+	}`
+	out, err := toGeminiRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// user, model (functionCall), user (functionResponse), user (follow-up)
+	if len(out.Contents) != 4 {
+		t.Fatalf("expected 4 contents, got %d", len(out.Contents))
+	}
+	wantRoles := []string{"user", "model", "user", "user"}
+	for i, c := range out.Contents {
+		if c.Role != wantRoles[i] {
+			t.Errorf("contents[%d] role: got %q, want %q", i, c.Role, wantRoles[i])
+		}
+	}
+	if out.Contents[1].Parts[0].FunctionCall == nil {
+		t.Error("contents[1] should have a functionCall part")
+	}
+	if out.Contents[2].Parts[0].FunctionResponse == nil {
+		t.Error("contents[2] should have a functionResponse part")
+	}
+}
+
+func TestAssistantMessageWithTextAndToolCallsGemini(t *testing.T) {
+	// assistant has both text content and tool_calls — both should appear as parts
+	raw := `{
+		"model": "gemini-2.5-flash",
+		"messages": [
+			{"role": "user", "content": "Get the weather please."},
+			{"role": "assistant", "content": "Sure, let me look that up.", "tool_calls": [
+				{"id": "c1", "type": "function", "function": {"name": "get_weather", "arguments": "{\"location\":\"Paris\"}"}}
+			]}
+		]
+	}`
+	out, err := toGeminiRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	modelMsg := out.Contents[1]
+	if len(modelMsg.Parts) != 2 {
+		t.Fatalf("expected 2 parts (text + functionCall), got %d", len(modelMsg.Parts))
+	}
+	if modelMsg.Parts[0].Text != "Sure, let me look that up." {
+		t.Errorf("parts[0] text: got %q", modelMsg.Parts[0].Text)
+	}
+	if modelMsg.Parts[1].FunctionCall == nil || modelMsg.Parts[1].FunctionCall.Name != "get_weather" {
+		t.Errorf("parts[1] functionCall: %+v", modelMsg.Parts[1])
+	}
+}
+
+func TestMultipleRoundsOfToolCallingGemini(t *testing.T) {
+	// Two sequential tool call rounds in one conversation.
+	raw := `{
+		"model": "gemini-2.5-flash",
+		"messages": [
+			{"role": "user", "content": "Weather in London and Paris?"},
+			{"role": "assistant", "content": null, "tool_calls": [
+				{"id": "c1", "type": "function", "function": {"name": "get_weather", "arguments": "{\"location\":\"London\"}"}}
+			]},
+			{"role": "tool", "tool_call_id": "c1", "content": "15°C and cloudy"},
+			{"role": "assistant", "content": null, "tool_calls": [
+				{"id": "c2", "type": "function", "function": {"name": "get_weather", "arguments": "{\"location\":\"Paris\"}"}}
+			]},
+			{"role": "tool", "tool_call_id": "c2", "content": "22°C and sunny"}
+		]
+	}`
+	out, err := toGeminiRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// user, model(fc1), user(fr1), model(fc2), user(fr2)
+	if len(out.Contents) != 5 {
+		t.Fatalf("expected 5 contents, got %d", len(out.Contents))
+	}
+	wantRoles := []string{"user", "model", "user", "model", "user"}
+	for i, c := range out.Contents {
+		if c.Role != wantRoles[i] {
+			t.Errorf("contents[%d] role: got %q, want %q", i, c.Role, wantRoles[i])
+		}
+	}
+	if out.Contents[1].Parts[0].FunctionCall == nil || out.Contents[1].Parts[0].FunctionCall.Name != "get_weather" {
+		t.Errorf("contents[1] should have get_weather functionCall")
+	}
+	if out.Contents[3].Parts[0].FunctionCall == nil || out.Contents[3].Parts[0].FunctionCall.Name != "get_weather" {
+		t.Errorf("contents[3] should have get_weather functionCall")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // toOpenAIResponse — functionCall parts → tool_calls
 // ---------------------------------------------------------------------------
