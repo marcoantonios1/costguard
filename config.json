@@ -140,7 +140,7 @@
         "timeout": "60s",
         "metadata": {
           "kind": "local",
-          "supports_tools": false,
+          "supports_tools": true,
           "supports_streaming": true,
           "supports_vision": false,
           "supports_embeddings": false,
