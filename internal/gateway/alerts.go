@@ -72,6 +72,44 @@ func (g *Gateway) emitMonthlyBudgetAlertOnce(
 	}
 }
 
+func (g *Gateway) emitAgentBudgetAlertOnce(ctx context.Context, now time.Time, agent string) {
+	if g.alertStore == nil {
+		return
+	}
+
+	periodStart := time.Date(now.UTC().Year(), now.UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
+	alertType := fmt.Sprintf("agent:%s", agent)
+
+	sent, err := g.alertStore.WasSent(ctx, periodStart, 100, alertType)
+	if err != nil {
+		if g.log != nil {
+			g.log.Error("agent_budget_alert_check_failed", map[string]any{
+				"agent": agent,
+				"error": err.Error(),
+			})
+		}
+		return
+	}
+
+	if sent {
+		return
+	}
+
+	if g.log != nil {
+		g.log.Error("agent_budget_100_percent_reached", map[string]any{
+			"agent":        agent,
+			"period_start": periodStart.Format(time.RFC3339),
+		})
+	}
+
+	if err := g.alertStore.MarkSent(ctx, periodStart, 100, alertType); err != nil && g.log != nil {
+		g.log.Error("agent_budget_alert_mark_sent_failed", map[string]any{
+			"agent": agent,
+			"error": err.Error(),
+		})
+	}
+}
+
 func (g *Gateway) sendBudgetAlertEmail(ctx context.Context, thresholdPercent int, periodStart time.Time) error {
 	if g.notifier == nil {
 		return fmt.Errorf("notifier not configured")

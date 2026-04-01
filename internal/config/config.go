@@ -61,6 +61,7 @@ type BudgetConfig struct {
 	MonthlyUSD float64            `json:"monthly_usd"`
 	Teams      map[string]float64 `json:"teams"`
 	Projects   map[string]float64 `json:"projects"`
+	Agents     map[string]float64 `json:"agents"`
 }
 
 type NotifyConfig struct {

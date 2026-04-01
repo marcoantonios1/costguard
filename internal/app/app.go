@@ -448,6 +448,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		MonthlyUSD: cfg.Budget.MonthlyUSD,
 		Teams:      cfg.Budget.Teams,
 		Projects:   cfg.Budget.Projects,
+		Agents:     cfg.Budget.Agents,
 	})
 
 	var notifier notify.Sender

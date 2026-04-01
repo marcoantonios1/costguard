@@ -29,6 +29,10 @@
     "projects": {
       "chatbot": 25,
       "analytics": 20
+    },
+    "agents": {
+      "ci-bot": 10,
+      "data-pipeline": 15
     }
   },
 

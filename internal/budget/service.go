@@ -12,12 +12,14 @@ var (
 	ErrMonthlyBudgetReachedNinetyPercent = errors.New("monthly budget reached 90%")
 	ErrTeamBudgetExceeded                = errors.New("team monthly budget exceeded")
 	ErrProjectBudgetExceeded             = errors.New("project monthly budget exceeded")
+	ErrAgentBudgetExceeded               = errors.New("agent monthly budget exceeded")
 )
 
 type UsageReader interface {
 	GetTotalSpend(ctx context.Context, from, to time.Time) (float64, error)
 	GetSpendForTeam(ctx context.Context, team string, from, to time.Time) (float64, error)
 	GetSpendForProject(ctx context.Context, project string, from, to time.Time) (float64, error)
+	GetSpendForAgent(ctx context.Context, agent string, from, to time.Time) (float64, error)
 }
 
 type Config struct {
@@ -25,6 +27,7 @@ type Config struct {
 	MonthlyUSD float64
 	Teams      map[string]float64
 	Projects   map[string]float64
+	Agents     map[string]float64
 }
 
 type Service struct {
@@ -132,6 +135,7 @@ func (s *Service) CheckRequestBudget(
 	now time.Time,
 	team string,
 	project string,
+	agent string,
 ) error {
 
 	if s == nil || !s.cfg.Enabled {
@@ -177,6 +181,21 @@ func (s *Service) CheckRequestBudget(
 
 			if limit > 0 && spend >= limit {
 				return ErrProjectBudgetExceeded
+			}
+		}
+	}
+
+	// -------- AGENT BUDGET --------
+	if agent != "" {
+		if limit, ok := s.cfg.Agents[agent]; ok {
+
+			spend, err := s.usage.GetSpendForAgent(ctx, agent, from, to)
+			if err != nil {
+				return err
+			}
+
+			if limit > 0 && spend >= limit {
+				return ErrAgentBudgetExceeded
 			}
 		}
 	}
