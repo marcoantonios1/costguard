@@ -320,7 +320,7 @@ func (c *Client) NormalizeError(statusCode int, body []byte) ([]byte, error) {
 
 	if err := json.Unmarshal(body, &raw); err == nil && raw.Error.Message != "" {
 		out.Error.Message = raw.Error.Message
-		out.Error.Type = "upstream_error"
+		out.Error.Type = geminiStatusToErrorType(raw.Error.Status)
 		out.Error.Code = raw.Error.Status
 		return json.Marshal(out)
 	}
@@ -328,4 +328,24 @@ func (c *Client) NormalizeError(statusCode int, body []byte) ([]byte, error) {
 	out.Error.Message = http.StatusText(statusCode)
 	out.Error.Type = "upstream_error"
 	return json.Marshal(out)
+}
+
+// geminiStatusToErrorType maps Gemini gRPC status strings to OpenAI error type names.
+func geminiStatusToErrorType(status string) string {
+	switch status {
+	case "INVALID_ARGUMENT":
+		return "invalid_request_error"
+	case "PERMISSION_DENIED":
+		return "permission_error"
+	case "UNAUTHENTICATED":
+		return "authentication_error"
+	case "RESOURCE_EXHAUSTED":
+		return "rate_limit_error"
+	case "NOT_FOUND":
+		return "not_found_error"
+	case "INTERNAL", "UNAVAILABLE":
+		return "api_error"
+	default:
+		return "upstream_error"
+	}
 }
