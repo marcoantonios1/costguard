@@ -644,6 +644,94 @@ func TestTranslateStream_ModelFromMessageStart(t *testing.T) {
 	}
 }
 
+func TestAssistantMessageWithTextAndToolCalls(t *testing.T) {
+	// assistant has both a text content and tool_calls — both should appear
+	raw := `{
+		"model": "claude-3-5-sonnet-20241022",
+		"messages": [
+			{"role": "user", "content": "Get the weather please."},
+			{"role": "assistant", "content": "Sure, let me look that up.", "tool_calls": [
+				{"id": "tc_1", "type": "function", "function": {"name": "get_weather", "arguments": "{\"location\":\"Paris\"}"}}
+			]}
+		]
+	}`
+	out, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assistantMsg := out.Messages[1]
+	if len(assistantMsg.Content) != 2 {
+		t.Fatalf("expected 2 content blocks (text + tool_use), got %d", len(assistantMsg.Content))
+	}
+	if assistantMsg.Content[0].Type != "text" || assistantMsg.Content[0].Text != "Sure, let me look that up." {
+		t.Errorf("block[0]: %+v", assistantMsg.Content[0])
+	}
+	if assistantMsg.Content[1].Type != "tool_use" || assistantMsg.Content[1].Name != "get_weather" {
+		t.Errorf("block[1]: %+v", assistantMsg.Content[1])
+	}
+}
+
+func TestAssistantMessageWithNullContentAndNoToolCallsIsSkipped(t *testing.T) {
+	// null content + no tool_calls → skip (Anthropic rejects empty text blocks)
+	raw := `{
+		"model": "claude-3-5-sonnet-20241022",
+		"messages": [
+			{"role": "user", "content": "hi"},
+			{"role": "assistant", "content": null},
+			{"role": "user", "content": "follow up"}
+		]
+	}`
+	out, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The empty assistant message should be skipped — only user messages remain.
+	if len(out.Messages) != 2 {
+		t.Fatalf("expected 2 messages (empty assistant skipped), got %d", len(out.Messages))
+	}
+	for i, msg := range out.Messages {
+		if msg.Role != "user" {
+			t.Errorf("message[%d] role: got %q, want user", i, msg.Role)
+		}
+	}
+}
+
+func TestMultipleRoundsOfToolCalling(t *testing.T) {
+	// Two sequential tool calls in the same conversation.
+	raw := `{
+		"model": "claude-3-5-sonnet-20241022",
+		"messages": [
+			{"role": "user", "content": "What is the weather in London and Paris?"},
+			{"role": "assistant", "content": null, "tool_calls": [
+				{"id": "tc_1", "type": "function", "function": {"name": "get_weather", "arguments": "{\"location\":\"London\"}"}}
+			]},
+			{"role": "tool", "tool_call_id": "tc_1", "content": "15°C and cloudy"},
+			{"role": "assistant", "content": null, "tool_calls": [
+				{"id": "tc_2", "type": "function", "function": {"name": "get_weather", "arguments": "{\"location\":\"Paris\"}"}}
+			]},
+			{"role": "tool", "tool_call_id": "tc_2", "content": "22°C and sunny"}
+		]
+	}`
+	out, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// user, assistant(tool_use), user(tool_result), assistant(tool_use), user(tool_result)
+	if len(out.Messages) != 5 {
+		t.Fatalf("expected 5 messages, got %d", len(out.Messages))
+	}
+	wantRoles := []string{"user", "assistant", "user", "assistant", "user"}
+	wantTypes := []string{"text", "tool_use", "tool_result", "tool_use", "tool_result"}
+	for i, msg := range out.Messages {
+		if msg.Role != wantRoles[i] {
+			t.Errorf("message[%d] role: got %q, want %q", i, msg.Role, wantRoles[i])
+		}
+		if len(msg.Content) == 0 || msg.Content[0].Type != wantTypes[i] {
+			t.Errorf("message[%d] content[0].type: got %+v, want %q", i, msg.Content, wantTypes[i])
+		}
+	}
+}
+
 func TestFullToolCallingCycleProducesCorrectMessageSequence(t *testing.T) {
 	// Full loop: user → assistant (tool_use) → tool result → user follow-up
 	raw := `{

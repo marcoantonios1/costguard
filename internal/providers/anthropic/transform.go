@@ -84,6 +84,9 @@ func toAnthropicRequest(in openAIChatCompletionRequest) (anthropicMessagesReques
 				if err != nil {
 					return anthropicMessagesRequest{}, err
 				}
+				if strings.TrimSpace(text) == "" {
+					continue
+				}
 				out.Messages = append(out.Messages, anthropicMessage{
 					Role:    "assistant",
 					Content: []anthropicContentBlock{{Type: "text", Text: text}},
