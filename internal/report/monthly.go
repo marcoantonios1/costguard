@@ -32,8 +32,8 @@ func NewService(usage UsageReader) *Service {
 }
 
 func (s *Service) BuildMonthlySummary(ctx context.Context, now time.Time) (MonthlySummary, error) {
-	from := time.Date(now.UTC().Year(), now.UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
-	to := from.AddDate(0, 1, 0)
+	to := time.Date(now.UTC().Year(), now.UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
+	from := to.AddDate(0, -1, 0)
 
 	total, err := s.usage.GetTotalSpend(ctx, from, to)
 	if err != nil {
