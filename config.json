@@ -43,6 +43,7 @@
       "gpt-4o-mini": "openai_primary",
       "claude-sonnet-4-6": "anthropic_primary",
       "gemini-2.5-flash": "google_primary",
+      "gemma4:26b": "local_ollama",
       "llama3.2": "local_ollama"
     },
     "model_compatibility": {
@@ -58,6 +59,9 @@
       "gemini-2.5-flash": {
         "openai_primary": "gpt-4o-mini",
         "anthropic_primary": "claude-sonnet-4-6"
+      },
+      "gemma4:26b": {
+        "openai_primary": "gpt-4o-mini"
       },
       "llama3.2": {
         "openai_primary": "gpt-4o-mini"
