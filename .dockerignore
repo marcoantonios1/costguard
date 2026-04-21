@@ -5,3 +5,4 @@ configs/
 scripts/
 *.log
 .DS_Store
+.claude
