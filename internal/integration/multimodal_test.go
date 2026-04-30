@@ -1,23 +1,120 @@
 // Package integration_test multimodal tests exercise image input transforms
-// end-to-end across all provider adapters using httptest stubs — no real API
-// keys required.
+// and vision token metering end-to-end across all provider adapters using
+// httptest stubs — no real API keys required.
 package integration_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/marcoantonios1/costguard/internal/budget"
+	"github.com/marcoantonios1/costguard/internal/cache"
 	"github.com/marcoantonios1/costguard/internal/gateway"
 	"github.com/marcoantonios1/costguard/internal/providers"
 	anthropic_provider "github.com/marcoantonios1/costguard/internal/providers/anthropic"
 	gemini_provider "github.com/marcoantonios1/costguard/internal/providers/gemini"
 	openai_provider "github.com/marcoantonios1/costguard/internal/providers/openai"
 	openaicompat_provider "github.com/marcoantonios1/costguard/internal/providers/openaicompat"
+	openai_http "github.com/marcoantonios1/costguard/internal/server/openai"
+	"github.com/marcoantonios1/costguard/internal/usage"
 )
+
+// ---------------------------------------------------------------------------
+// Vision metering helpers
+// ---------------------------------------------------------------------------
+
+// accumulatingStore is an in-memory usage.Store that sums EstimatedCostUSD
+// across all saved records so budget.Service can query realistic spend.
+type accumulatingStore struct {
+	mu      sync.Mutex
+	records []usage.Record
+}
+
+func (s *accumulatingStore) Save(_ context.Context, r usage.Record) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.records = append(s.records, r)
+	return nil
+}
+
+func (s *accumulatingStore) totalCost() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var sum float64
+	for _, r := range s.records {
+		sum += r.EstimatedCostUSD
+	}
+	return sum
+}
+
+func (s *accumulatingStore) all() []usage.Record {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := make([]usage.Record, len(s.records))
+	copy(cp, s.records)
+	return cp
+}
+
+func (s *accumulatingStore) GetTotalSpend(_ context.Context, _, _ time.Time) (float64, error) {
+	return s.totalCost(), nil
+}
+func (s *accumulatingStore) GetSpendByTeam(_ context.Context, _, _ time.Time) ([]usage.TeamSpend, error) {
+	return nil, nil
+}
+func (s *accumulatingStore) GetSpendByProvider(_ context.Context, _, _ time.Time) ([]usage.ProviderSpend, error) {
+	return nil, nil
+}
+func (s *accumulatingStore) GetSpendByModel(_ context.Context, _, _ time.Time) ([]usage.ModelSpend, error) {
+	return nil, nil
+}
+func (s *accumulatingStore) GetSpendByProject(_ context.Context, _, _ time.Time) ([]usage.ProjectSpend, error) {
+	return nil, nil
+}
+func (s *accumulatingStore) GetSpendForTeam(_ context.Context, _ string, _, _ time.Time) (float64, error) {
+	return 0, nil
+}
+func (s *accumulatingStore) GetSpendForProject(_ context.Context, _ string, _, _ time.Time) (float64, error) {
+	return 0, nil
+}
+func (s *accumulatingStore) GetSpendForAgent(_ context.Context, _ string, _, _ time.Time) (float64, error) {
+	return 0, nil
+}
+func (s *accumulatingStore) GetSpendByAgent(_ context.Context, _, _ time.Time) ([]usage.AgentSpend, error) {
+	return nil, nil
+}
+
+// newHarnessWithBudget wires the gateway with an accumulatingStore and a
+// budget.Service configured with the given monthly limit (USD).
+func newHarnessWithBudget(reg *providers.Registry, monthlyUSD float64) (*httptest.Server, *accumulatingStore) {
+	store := &accumulatingStore{}
+	budgetSvc := budget.NewService(store, budget.Config{
+		Enabled:    true,
+		MonthlyUSD: monthlyUSD,
+	})
+
+	gw, err := gateway.New(gateway.Deps{
+		Router:        &staticRouter{},
+		Registry:      reg,
+		Cache:         cache.NewMemory(0), // no caching for budget tests
+		CacheTTL:      0,
+		UsageStore:    store,
+		BudgetChecker: budgetSvc,
+	})
+	if err != nil {
+		panic("gateway.New: " + err.Error())
+	}
+
+	mux := http.NewServeMux()
+	openai_http.Register(mux, openai_http.Deps{Gateway: gw})
+	return httptest.NewServer(mux), store
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
