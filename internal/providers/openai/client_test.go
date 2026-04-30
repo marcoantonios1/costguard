@@ -1,8 +1,13 @@
 package openai
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/marcoantonios1/costguard/internal/providers"
@@ -95,6 +100,118 @@ func TestNormalizeError_OpenAI_MalformedToolSchema(t *testing.T) {
 	parsed := parseErrorBody(t, out)
 	if parsed.Error.Type != "invalid_request_error" {
 		t.Errorf("type: got %q, want invalid_request_error", parsed.Error.Type)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Do — image content passthrough
+// ---------------------------------------------------------------------------
+
+// minimalOKResponse is a valid OpenAI chat completion JSON returned by the
+// stub server so ParseResponseMeta and metering don't choke.
+const minimalOKResponse = `{"id":"x","object":"chat.completion","created":1,"model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}`
+
+func stubServer(t *testing.T, capture *[]byte) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		*capture = body
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(minimalOKResponse))
+	}))
+}
+
+func makeRequest(t *testing.T, srvURL, payload string) *http.Request {
+	t.Helper()
+	u, _ := url.Parse(srvURL + "/v1/chat/completions")
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, u.String(), strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+func TestDo_ImageURLBlockForwardedUnchanged(t *testing.T) {
+	var received []byte
+	srv := stubServer(t, &received)
+	defer srv.Close()
+
+	client, _ := NewClient(ClientConfig{Name: "test", BaseURL: srv.URL})
+
+	payload := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.com/photo.png"}}]}]}`
+	resp, err := client.Do(context.Background(), makeRequest(t, srv.URL, payload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if string(received) != payload {
+		t.Errorf("body modified in transit\ngot:  %s\nwant: %s", received, payload)
+	}
+}
+
+func TestDo_DetailFieldPreserved(t *testing.T) {
+	var received []byte
+	srv := stubServer(t, &received)
+	defer srv.Close()
+
+	client, _ := NewClient(ClientConfig{Name: "test", BaseURL: srv.URL})
+
+	payload := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.com/photo.png","detail":"high"}}]}]}`
+	resp, err := client.Do(context.Background(), makeRequest(t, srv.URL, payload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var body map[string]any
+	if err := json.Unmarshal(received, &body); err != nil {
+		t.Fatalf("received body is not valid JSON: %v", err)
+	}
+	messages := body["messages"].([]any)
+	content := messages[0].(map[string]any)["content"].([]any)
+	imageURL := content[0].(map[string]any)["image_url"].(map[string]any)
+	if imageURL["detail"] != "high" {
+		t.Errorf("detail field lost: got %v", imageURL["detail"])
+	}
+}
+
+func TestDo_ImageOnlyMessageForwardedWithoutError(t *testing.T) {
+	var received []byte
+	srv := stubServer(t, &received)
+	defer srv.Close()
+
+	client, _ := NewClient(ClientConfig{Name: "test", BaseURL: srv.URL})
+
+	payload := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.com/photo.png"}}]}]}`
+	resp, err := client.Do(context.Background(), makeRequest(t, srv.URL, payload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200", resp.StatusCode)
+	}
+	if len(received) == 0 {
+		t.Error("upstream received empty body")
+	}
+}
+
+func TestDo_MixedTextAndImageBlocksForwardedUnchanged(t *testing.T) {
+	var received []byte
+	srv := stubServer(t, &received)
+	defer srv.Close()
+
+	client, _ := NewClient(ClientConfig{Name: "test", BaseURL: srv.URL})
+
+	payload := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":[{"type":"text","text":"describe this"},{"type":"image_url","image_url":{"url":"https://example.com/a.png","detail":"low"}},{"type":"image_url","image_url":{"url":"https://example.com/b.png"}}]}]}`
+	resp, err := client.Do(context.Background(), makeRequest(t, srv.URL, payload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if string(received) != payload {
+		t.Errorf("body modified in transit\ngot:  %s\nwant: %s", received, payload)
 	}
 }
 

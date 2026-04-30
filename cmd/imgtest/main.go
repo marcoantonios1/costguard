@@ -1,5 +1,5 @@
 // Manual smoke-test for image transforms.
-// Usage: go run ./cmd/imgtest [--provider anthropic|gemini] [image-url-or-data-uri]
+// Usage: go run ./cmd/imgtest [--provider anthropic|gemini|openai] [image-url-or-data-uri]
 // Reads API keys from .env in the project root.
 package main
 
@@ -18,6 +18,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/marcoantonios1/costguard/internal/providers/anthropic"
 	"github.com/marcoantonios1/costguard/internal/providers/gemini"
+	"github.com/marcoantonios1/costguard/internal/providers/openai"
 )
 
 type doer interface {
@@ -27,7 +28,7 @@ type doer interface {
 func main() {
 	_ = godotenv.Load(".env")
 
-	provider := flag.String("provider", "anthropic", "Provider to test: anthropic or gemini")
+	provider := flag.String("provider", "anthropic", "Provider to test: anthropic, gemini, or openai")
 	flag.Parse()
 
 	imageURL := flag.Arg(0)
@@ -67,8 +68,22 @@ func main() {
 		client = c
 		model = "gemini-2.5-flash"
 
+	case "openai":
+		apiKey := os.Getenv("OPENAI_API_KEY")
+		if apiKey == "" {
+			fmt.Fprintln(os.Stderr, "OPENAI_API_KEY is not set")
+			os.Exit(1)
+		}
+		c, err := openai.NewClient(openai.ClientConfig{Name: "test", APIKey: apiKey})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "new openai client:", err)
+			os.Exit(1)
+		}
+		client = c
+		model = "gpt-4o-mini"
+
 	default:
-		fmt.Fprintf(os.Stderr, "unknown provider %q; use anthropic or gemini\n", *provider)
+		fmt.Fprintf(os.Stderr, "unknown provider %q; use anthropic, gemini, or openai\n", *provider)
 		os.Exit(1)
 	}
 
