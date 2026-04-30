@@ -2,14 +2,30 @@ package gemini
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 	"time"
+
+	"github.com/marcoantonios1/costguard/internal/providers/openaiformat"
 )
 
-func toGeminiRequest(in openAIChatCompletionRequest) (geminiGenerateContentRequest, error) {
+// imageFetcher downloads a URL and returns the raw bytes and MIME type.
+// The gateway supplies a real HTTP client; tests inject a stub.
+type imageFetcher func(url string) (data []byte, mimeType string, err error)
+
+var geminiSupportedMimeTypes = map[string]bool{
+	"image/jpeg": true,
+	"image/png":  true,
+	"image/gif":  true,
+	"image/webp": true,
+	"image/heic": true,
+	"image/heif": true,
+}
+
+func toGeminiRequest(in openAIChatCompletionRequest, fetch imageFetcher) (geminiGenerateContentRequest, error) {
 	if in.Model == "" {
 		return geminiGenerateContentRequest{}, fmt.Errorf("model is required")
 	}
@@ -40,17 +56,14 @@ func toGeminiRequest(in openAIChatCompletionRequest) (geminiGenerateContentReque
 			}
 
 		case "user":
-			text, err := contentToText(msg.Content)
+			parts, err := userContentToGeminiParts(msg.Content, fetch)
 			if err != nil {
 				return geminiGenerateContentRequest{}, err
 			}
-			if strings.TrimSpace(text) == "" {
+			if len(parts) == 0 {
 				continue
 			}
-			contents = append(contents, geminiContent{
-				Role:  "user",
-				Parts: []geminiPart{{Text: text}},
-			})
+			contents = append(contents, geminiContent{Role: "user", Parts: parts})
 
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {
@@ -426,6 +439,77 @@ func translateGeminiStream(requestModel string, r io.Reader, w io.Writer) {
 	}
 
 	_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
+}
+
+func userContentToGeminiParts(v any, fetch imageFetcher) ([]geminiPart, error) {
+	parsed, err := openaiformat.ParseContentParts(v)
+	if err != nil {
+		return nil, err
+	}
+	parts := make([]geminiPart, 0, len(parsed))
+	for _, p := range parsed {
+		switch p.Type {
+		case "text":
+			if strings.TrimSpace(p.Text) != "" {
+				parts = append(parts, geminiPart{Text: p.Text})
+			}
+		case "image_url":
+			gp, err := imageURLToGeminiPart(p.ImageURL.URL, fetch)
+			if err != nil {
+				return nil, err
+			}
+			parts = append(parts, gp)
+		}
+	}
+	return parts, nil
+}
+
+func imageURLToGeminiPart(rawURL string, fetch imageFetcher) (geminiPart, error) {
+	if strings.HasPrefix(rawURL, "data:") {
+		rest := strings.TrimPrefix(rawURL, "data:")
+		semicolonIdx := strings.IndexByte(rest, ';')
+		if semicolonIdx < 0 {
+			return geminiPart{}, fmt.Errorf("malformed data URI: missing semicolon")
+		}
+		mimeType := rest[:semicolonIdx]
+		encodingAndData := rest[semicolonIdx+1:]
+		commaIdx := strings.IndexByte(encodingAndData, ',')
+		if commaIdx < 0 {
+			return geminiPart{}, fmt.Errorf("malformed data URI: missing comma")
+		}
+		if encodingAndData[:commaIdx] != "base64" {
+			return geminiPart{}, fmt.Errorf("data URI encoding %q is not supported; only base64 is accepted", encodingAndData[:commaIdx])
+		}
+		if !geminiSupportedMimeTypes[mimeType] {
+			return geminiPart{}, fmt.Errorf("unsupported image media type %q; accepted: image/jpeg, image/png, image/gif, image/webp, image/heic, image/heif", mimeType)
+		}
+		return geminiPart{
+			InlineData: &geminiInlineData{
+				MimeType: mimeType,
+				Data:     encodingAndData[commaIdx+1:],
+			},
+		}, nil
+	}
+
+	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+		return geminiPart{}, fmt.Errorf("image_url must be a data URI or an http(s) URL")
+	}
+	if fetch == nil {
+		return geminiPart{}, fmt.Errorf("cannot fetch image URL %q: no HTTP fetcher configured", rawURL)
+	}
+	data, mimeType, err := fetch(rawURL)
+	if err != nil {
+		return geminiPart{}, fmt.Errorf("failed to fetch image %q: %w", rawURL, err)
+	}
+	if !geminiSupportedMimeTypes[mimeType] {
+		return geminiPart{}, fmt.Errorf("unsupported image media type %q fetched from %q", mimeType, rawURL)
+	}
+	return geminiPart{
+		InlineData: &geminiInlineData{
+			MimeType: mimeType,
+			Data:     base64.StdEncoding.EncodeToString(data),
+		},
+	}, nil
 }
 
 func contentToText(v any) (string, error) {

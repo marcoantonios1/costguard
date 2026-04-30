@@ -6,6 +6,211 @@ import (
 	"testing"
 )
 
+// ---------------------------------------------------------------------------
+// image support in user messages
+// ---------------------------------------------------------------------------
+
+func TestUserMessageDataURIConvertsToBase64Block(t *testing.T) {
+	raw := `{
+		"model": "claude-3-5-sonnet-20241022",
+		"messages": [
+			{"role": "user", "content": [
+				{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/abc123"}}
+			]}
+		]
+	}`
+	out, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(out.Messages))
+	}
+	blocks := out.Messages[0].Content
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(blocks))
+	}
+	b := blocks[0]
+	if b.Type != "image" {
+		t.Errorf("block type: got %q, want image", b.Type)
+	}
+	if b.Source == nil {
+		t.Fatal("Source is nil")
+	}
+	if b.Source.Type != "base64" {
+		t.Errorf("source type: got %q, want base64", b.Source.Type)
+	}
+	if b.Source.MediaType != "image/jpeg" {
+		t.Errorf("media_type: got %q, want image/jpeg", b.Source.MediaType)
+	}
+	if b.Source.Data != "/9j/abc123" {
+		t.Errorf("data: got %q", b.Source.Data)
+	}
+}
+
+func TestUserMessageHTTPSURLConvertsToURLBlock(t *testing.T) {
+	raw := `{
+		"model": "claude-3-5-sonnet-20241022",
+		"messages": [
+			{"role": "user", "content": [
+				{"type": "image_url", "image_url": {"url": "https://example.com/photo.png"}}
+			]}
+		]
+	}`
+	out, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	b := out.Messages[0].Content[0]
+	if b.Type != "image" {
+		t.Errorf("block type: got %q, want image", b.Type)
+	}
+	if b.Source == nil {
+		t.Fatal("Source is nil")
+	}
+	if b.Source.Type != "url" {
+		t.Errorf("source type: got %q, want url", b.Source.Type)
+	}
+	if b.Source.URL != "https://example.com/photo.png" {
+		t.Errorf("url: got %q", b.Source.URL)
+	}
+}
+
+func TestUserMessageImageOnlyNoError(t *testing.T) {
+	raw := `{
+		"model": "claude-3-5-sonnet-20241022",
+		"messages": [
+			{"role": "user", "content": [
+				{"type": "image_url", "image_url": {"url": "https://example.com/img.png"}}
+			]}
+		]
+	}`
+	_, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error for image-only message: %v", err)
+	}
+}
+
+func TestUserMessageMixedTextAndImagePreservesOrder(t *testing.T) {
+	raw := `{
+		"model": "claude-3-5-sonnet-20241022",
+		"messages": [
+			{"role": "user", "content": [
+				{"type": "text", "text": "What is in this image?"},
+				{"type": "image_url", "image_url": {"url": "https://example.com/cat.jpg"}},
+				{"type": "text", "text": "And this one?"},
+				{"type": "image_url", "image_url": {"url": "data:image/png;base64,abc=="}}
+			]}
+		]
+	}`
+	out, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	blocks := out.Messages[0].Content
+	if len(blocks) != 4 {
+		t.Fatalf("expected 4 blocks, got %d", len(blocks))
+	}
+	wantTypes := []string{"text", "image", "text", "image"}
+	for i, b := range blocks {
+		if b.Type != wantTypes[i] {
+			t.Errorf("blocks[%d].Type = %q, want %q", i, b.Type, wantTypes[i])
+		}
+	}
+	if blocks[0].Text != "What is in this image?" {
+		t.Errorf("blocks[0].Text = %q", blocks[0].Text)
+	}
+	if blocks[2].Text != "And this one?" {
+		t.Errorf("blocks[2].Text = %q", blocks[2].Text)
+	}
+	if blocks[1].Source.URL != "https://example.com/cat.jpg" {
+		t.Errorf("blocks[1] url = %q", blocks[1].Source.URL)
+	}
+	if blocks[3].Source.MediaType != "image/png" {
+		t.Errorf("blocks[3] media_type = %q", blocks[3].Source.MediaType)
+	}
+}
+
+func TestUserMessageAllSupportedMediaTypes(t *testing.T) {
+	for _, mt := range []string{"image/jpeg", "image/png", "image/gif", "image/webp"} {
+		raw := `{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:` + mt + `;base64,abc"}}]}]}`
+		_, err := toAnthropicRequest(unmarshalRequest(t, raw))
+		if err != nil {
+			t.Errorf("media type %q should be accepted, got error: %v", mt, err)
+		}
+	}
+}
+
+func TestUserMessageUnsupportedMediaTypeErrors(t *testing.T) {
+	for _, mt := range []string{"image/tiff", "image/bmp", "image/svg+xml"} {
+		raw := `{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:` + mt + `;base64,abc"}}]}]}`
+		_, err := toAnthropicRequest(unmarshalRequest(t, raw))
+		if err == nil {
+			t.Errorf("media type %q should be rejected", mt)
+		}
+	}
+}
+
+func TestUserMessageMalformedDataURIMissingSemicolon(t *testing.T) {
+	raw := `{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/jpeg,abc"}}]}]}`
+	_, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err == nil {
+		t.Error("expected error for data URI missing semicolon")
+	}
+}
+
+func TestUserMessageMalformedDataURIMissingComma(t *testing.T) {
+	raw := `{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/jpeg;base64"}}]}]}`
+	_, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err == nil {
+		t.Error("expected error for data URI missing comma")
+	}
+}
+
+func TestUserMessageNonBase64EncodingErrors(t *testing.T) {
+	raw := `{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/jpeg;utf8,hello"}}]}]}`
+	_, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err == nil {
+		t.Error("expected error for non-base64 data URI")
+	}
+}
+
+func TestUserMessageNonHTTPSchemeErrors(t *testing.T) {
+	raw := `{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"ftp://example.com/img.jpg"}}]}]}`
+	_, err := toAnthropicRequest(unmarshalRequest(t, raw))
+	if err == nil {
+		t.Error("expected error for ftp:// image URL")
+	}
+}
+
+func TestImageBlockSerializesCorrectly(t *testing.T) {
+	block := anthropicContentBlock{
+		Type: "image",
+		Source: &anthropicImageSource{
+			Type:      "base64",
+			MediaType: "image/jpeg",
+			Data:      "abc123",
+		},
+	}
+	b, err := json.Marshal(block)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"type":"image"`) {
+		t.Errorf("missing type:image in %s", s)
+	}
+	if !strings.Contains(s, `"source"`) {
+		t.Errorf("missing source in %s", s)
+	}
+	if !strings.Contains(s, `"media_type":"image/jpeg"`) {
+		t.Errorf("missing media_type in %s", s)
+	}
+	if strings.Contains(s, `"text"`) {
+		t.Errorf("text field should be absent in %s", s)
+	}
+}
+
 func ptr[T any](v T) *T { return &v }
 
 // unmarshalRequest is a helper that decodes a JSON string into openAIChatCompletionRequest.

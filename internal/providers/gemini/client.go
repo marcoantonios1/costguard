@@ -103,7 +103,24 @@ func (c *Client) doChatCompletions(ctx context.Context, req *http.Request) (*htt
 		)
 	}
 
-	gemReq, err := toGeminiRequest(oaReq)
+	fetch := func(u string) ([]byte, string, error) {
+		resp, err := c.hc.Get(u)
+		if err != nil {
+			return nil, "", err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, "", fmt.Errorf("HTTP %d fetching image", resp.StatusCode)
+		}
+		ct := resp.Header.Get("Content-Type")
+		if idx := strings.IndexByte(ct, ';'); idx >= 0 {
+			ct = strings.TrimSpace(ct[:idx])
+		}
+		data, err := io.ReadAll(resp.Body)
+		return data, ct, err
+	}
+
+	gemReq, err := toGeminiRequest(oaReq, fetch)
 	if err != nil {
 		return jsonResponse(
 			req,
