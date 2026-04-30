@@ -7,7 +7,16 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/marcoantonios1/costguard/internal/providers/openaiformat"
 )
+
+var anthropicSupportedMediaTypes = map[string]bool{
+	"image/jpeg": true,
+	"image/png":  true,
+	"image/gif":  true,
+	"image/webp": true,
+}
 
 func toAnthropicRequest(in openAIChatCompletionRequest) (anthropicMessagesRequest, error) {
 	if in.Model == "" {
@@ -94,13 +103,13 @@ func toAnthropicRequest(in openAIChatCompletionRequest) (anthropicMessagesReques
 			}
 
 		case "user":
-			text, err := openAIContentToText(msg.Content)
+			blocks, err := userContentToAnthropicBlocks(msg.Content)
 			if err != nil {
 				return anthropicMessagesRequest{}, err
 			}
 			out.Messages = append(out.Messages, anthropicMessage{
 				Role:    "user",
-				Content: []anthropicContentBlock{{Type: "text", Text: text}},
+				Content: blocks,
 			})
 
 		case "tool":
@@ -231,6 +240,67 @@ func schemaRequired(params any) []string {
 		}
 	}
 	return out
+}
+
+func userContentToAnthropicBlocks(v any) ([]anthropicContentBlock, error) {
+	parts, err := openaiformat.ParseContentParts(v)
+	if err != nil {
+		return nil, err
+	}
+	if len(parts) == 0 {
+		return []anthropicContentBlock{{Type: "text", Text: ""}}, nil
+	}
+	blocks := make([]anthropicContentBlock, 0, len(parts))
+	for _, p := range parts {
+		switch p.Type {
+		case "text":
+			blocks = append(blocks, anthropicContentBlock{Type: "text", Text: p.Text})
+		case "image_url":
+			block, err := imageURLToAnthropicBlock(p.ImageURL.URL)
+			if err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, block)
+		}
+	}
+	return blocks, nil
+}
+
+func imageURLToAnthropicBlock(rawURL string) (anthropicContentBlock, error) {
+	if strings.HasPrefix(rawURL, "data:") {
+		rest := strings.TrimPrefix(rawURL, "data:")
+		semicolonIdx := strings.IndexByte(rest, ';')
+		if semicolonIdx < 0 {
+			return anthropicContentBlock{}, fmt.Errorf("malformed data URI: missing semicolon")
+		}
+		mediaType := rest[:semicolonIdx]
+		encodingAndData := rest[semicolonIdx+1:]
+		commaIdx := strings.IndexByte(encodingAndData, ',')
+		if commaIdx < 0 {
+			return anthropicContentBlock{}, fmt.Errorf("malformed data URI: missing comma")
+		}
+		if encodingAndData[:commaIdx] != "base64" {
+			return anthropicContentBlock{}, fmt.Errorf("data URI encoding %q is not supported; only base64 is accepted", encodingAndData[:commaIdx])
+		}
+		if !anthropicSupportedMediaTypes[mediaType] {
+			return anthropicContentBlock{}, fmt.Errorf("unsupported image media type %q; accepted: image/jpeg, image/png, image/gif, image/webp", mediaType)
+		}
+		return anthropicContentBlock{
+			Type: "image",
+			Source: &anthropicImageSource{
+				Type:      "base64",
+				MediaType: mediaType,
+				Data:      encodingAndData[commaIdx+1:],
+			},
+		}, nil
+	}
+	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+		return anthropicContentBlock{}, fmt.Errorf("image_url must be a data URI or an http(s) URL")
+	}
+	return anthropicContentBlock{
+		Type:   "image",
+		Source: &anthropicImageSource{Type: "url", URL: rawURL},
+	}, nil
 }
 
 func openAIContentToText(v any) (string, error) {

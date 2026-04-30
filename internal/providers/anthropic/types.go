@@ -70,6 +70,8 @@ type anthropicContentBlock struct {
 	Type string `json:"type"`
 	// text block
 	Text string `json:"text,omitempty"`
+	// image block
+	Source *anthropicImageSource `json:"source,omitempty"`
 	// tool_use block
 	ID    string `json:"id,omitempty"`
 	Name  string `json:"name,omitempty"`
@@ -77,6 +79,13 @@ type anthropicContentBlock struct {
 	// tool_result block
 	ToolUseID string `json:"tool_use_id,omitempty"`
 	Content   string `json:"content,omitempty"`
+}
+
+type anthropicImageSource struct {
+	Type      string `json:"type"`                  // "base64" | "url"
+	MediaType string `json:"media_type,omitempty"` // base64 only
+	Data      string `json:"data,omitempty"`        // base64 only
+	URL       string `json:"url,omitempty"`         // url only
 }
 
 type anthropicMessagesResponse struct {
