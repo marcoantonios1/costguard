@@ -1,7 +1,10 @@
 package gemini
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -30,7 +33,7 @@ func TestToolsMappedToFunctionDeclarations(t *testing.T) {
 		}}],
 		"tool_choice": "auto"
 	}`
-	out, err := toGeminiRequest(unmarshalRequest(t, raw))
+	out, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -56,7 +59,7 @@ func TestToolChoiceNoneOmitsTools(t *testing.T) {
 		"tools": [{"type": "function", "function": {"name": "fn"}}],
 		"tool_choice": "none"
 	}`
-	out, err := toGeminiRequest(unmarshalRequest(t, raw))
+	out, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -75,7 +78,7 @@ func TestToolChoiceAutoMapsToAUTO(t *testing.T) {
 		"tools": [{"type": "function", "function": {"name": "fn"}}],
 		"tool_choice": "auto"
 	}`
-	out, err := toGeminiRequest(unmarshalRequest(t, raw))
+	out, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -91,7 +94,7 @@ func TestToolChoiceRequiredMapsToANY(t *testing.T) {
 		"tools": [{"type": "function", "function": {"name": "fn"}}],
 		"tool_choice": "required"
 	}`
-	out, err := toGeminiRequest(unmarshalRequest(t, raw))
+	out, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -107,7 +110,7 @@ func TestToolChoiceSpecificFunctionMapsToAllowedFunctionNames(t *testing.T) {
 		"tools": [{"type": "function", "function": {"name": "get_weather"}}],
 		"tool_choice": {"type": "function", "function": {"name": "get_weather"}}
 	}`
-	out, err := toGeminiRequest(unmarshalRequest(t, raw))
+	out, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,7 +137,7 @@ func TestAssistantToolCallsMappedToFunctionCallParts(t *testing.T) {
 			]}
 		]
 	}`
-	out, err := toGeminiRequest(unmarshalRequest(t, raw))
+	out, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -173,7 +176,7 @@ func TestToolRoleMappedToFunctionResponse(t *testing.T) {
 			{"role": "tool", "tool_call_id": "call_gw", "content": "15°C and cloudy"}
 		]
 	}`
-	out, err := toGeminiRequest(unmarshalRequest(t, raw))
+	out, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -211,7 +214,7 @@ func TestParallelToolResultsCoalesced(t *testing.T) {
 			{"role": "tool", "tool_call_id": "c2", "content": "r2"}
 		]
 	}`
-	out, err := toGeminiRequest(unmarshalRequest(t, raw))
+	out, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -237,7 +240,7 @@ func TestFullToolCallingCycleGemini(t *testing.T) {
 			{"role": "user", "content": "Thanks!"}
 		]
 	}`
-	out, err := toGeminiRequest(unmarshalRequest(t, raw))
+	out, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -270,7 +273,7 @@ func TestAssistantMessageWithTextAndToolCallsGemini(t *testing.T) {
 			]}
 		]
 	}`
-	out, err := toGeminiRequest(unmarshalRequest(t, raw))
+	out, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -302,7 +305,7 @@ func TestMultipleRoundsOfToolCallingGemini(t *testing.T) {
 			{"role": "tool", "tool_call_id": "c2", "content": "22°C and sunny"}
 		]
 	}`
-	out, err := toGeminiRequest(unmarshalRequest(t, raw))
+	out, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -610,5 +613,214 @@ func TestTextResponseHasNoToolCalls(t *testing.T) {
 	}
 	if out.Choices[0].FinishReason != "stop" {
 		t.Errorf("finish_reason: got %q", out.Choices[0].FinishReason)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// image support in user messages
+// ---------------------------------------------------------------------------
+
+func noFetch(t *testing.T) imageFetcher {
+	t.Helper()
+	return func(u string) ([]byte, string, error) {
+		t.Errorf("unexpected fetch call for URL %q", u)
+		return nil, "", errors.New("unexpected fetch")
+	}
+}
+
+func stubFetch(url string, data []byte, mimeType string) imageFetcher {
+	return func(u string) ([]byte, string, error) {
+		if u == url {
+			return data, mimeType, nil
+		}
+		return nil, "", fmt.Errorf("unexpected URL: %s", u)
+	}
+}
+
+func TestUserMessageDataURIConvertsToInlineData(t *testing.T) {
+	raw := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":[
+		{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,/9j/abc123"}}
+	]}]}`
+	out, err := toGeminiRequest(unmarshalRequest(t, raw), noFetch(t))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out.Contents) != 1 {
+		t.Fatalf("expected 1 content, got %d", len(out.Contents))
+	}
+	parts := out.Contents[0].Parts
+	if len(parts) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(parts))
+	}
+	p := parts[0]
+	if p.InlineData == nil {
+		t.Fatal("InlineData is nil")
+	}
+	if p.InlineData.MimeType != "image/jpeg" {
+		t.Errorf("mimeType: got %q, want image/jpeg", p.InlineData.MimeType)
+	}
+	if p.InlineData.Data != "/9j/abc123" {
+		t.Errorf("data: got %q", p.InlineData.Data)
+	}
+}
+
+func TestUserMessageHTTPSURLFetchedAndConvertedToInlineData(t *testing.T) {
+	imgBytes := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+	fetch := stubFetch("https://example.com/photo.png", imgBytes, "image/png")
+
+	raw := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":[
+		{"type":"image_url","image_url":{"url":"https://example.com/photo.png"}}
+	]}]}`
+	out, err := toGeminiRequest(unmarshalRequest(t, raw), fetch)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	p := out.Contents[0].Parts[0]
+	if p.InlineData == nil {
+		t.Fatal("InlineData is nil")
+	}
+	if p.InlineData.MimeType != "image/png" {
+		t.Errorf("mimeType: got %q, want image/png", p.InlineData.MimeType)
+	}
+	want := base64.StdEncoding.EncodeToString(imgBytes)
+	if p.InlineData.Data != want {
+		t.Errorf("data: got %q, want %q", p.InlineData.Data, want)
+	}
+}
+
+func TestUserMessageImageOnlyNoError(t *testing.T) {
+	raw := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":[
+		{"type":"image_url","image_url":{"url":"data:image/png;base64,abc="}}
+	]}]}`
+	_, err := toGeminiRequest(unmarshalRequest(t, raw), noFetch(t))
+	if err != nil {
+		t.Fatalf("unexpected error for image-only message: %v", err)
+	}
+}
+
+func TestUserMessageMixedTextAndImagePreservesOrder(t *testing.T) {
+	imgBytes := []byte("fakepng")
+	fetch := func(u string) ([]byte, string, error) { return imgBytes, "image/png", nil }
+
+	raw := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":[
+		{"type":"text","text":"What is in this image?"},
+		{"type":"image_url","image_url":{"url":"https://example.com/a.png"}},
+		{"type":"text","text":"And this?"},
+		{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,xyz="}}
+	]}]}`
+	out, err := toGeminiRequest(unmarshalRequest(t, raw), fetch)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	parts := out.Contents[0].Parts
+	if len(parts) != 4 {
+		t.Fatalf("expected 4 parts, got %d", len(parts))
+	}
+	if parts[0].Text != "What is in this image?" {
+		t.Errorf("parts[0].Text = %q", parts[0].Text)
+	}
+	if parts[1].InlineData == nil || parts[1].InlineData.MimeType != "image/png" {
+		t.Errorf("parts[1] should be inlineData png, got %+v", parts[1])
+	}
+	if parts[2].Text != "And this?" {
+		t.Errorf("parts[2].Text = %q", parts[2].Text)
+	}
+	if parts[3].InlineData == nil || parts[3].InlineData.MimeType != "image/jpeg" {
+		t.Errorf("parts[3] should be inlineData jpeg, got %+v", parts[3])
+	}
+}
+
+func TestUserMessageFetchFailureReturnsError(t *testing.T) {
+	fetch := func(u string) ([]byte, string, error) {
+		return nil, "", errors.New("connection refused")
+	}
+	raw := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":[
+		{"type":"image_url","image_url":{"url":"https://example.com/img.png"}}
+	]}]}`
+	_, err := toGeminiRequest(unmarshalRequest(t, raw), fetch)
+	if err == nil {
+		t.Error("expected error on fetch failure")
+	}
+}
+
+func TestUserMessageNilFetcherForURLReturnsError(t *testing.T) {
+	raw := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":[
+		{"type":"image_url","image_url":{"url":"https://example.com/img.png"}}
+	]}]}`
+	_, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
+	if err == nil {
+		t.Error("expected error when fetcher is nil and URL is https")
+	}
+}
+
+func TestUserMessageUnsupportedMediaTypeErrors(t *testing.T) {
+	for _, mt := range []string{"image/tiff", "image/bmp", "image/svg+xml"} {
+		raw := `{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:` + mt + `;base64,abc"}}]}]}`
+		_, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
+		if err == nil {
+			t.Errorf("media type %q should be rejected", mt)
+		}
+	}
+}
+
+func TestUserMessageAllSupportedMediaTypesAccepted(t *testing.T) {
+	for _, mt := range []string{"image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif"} {
+		raw := `{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:` + mt + `;base64,abc"}}]}]}`
+		_, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
+		if err != nil {
+			t.Errorf("media type %q should be accepted, got: %v", mt, err)
+		}
+	}
+}
+
+func TestUserMessageMalformedDataURIErrors(t *testing.T) {
+	cases := []string{
+		"data:image/jpeg,abc",          // missing semicolon
+		"data:image/jpeg;base64",       // missing comma
+		"data:image/jpeg;utf8,hello",   // non-base64 encoding
+	}
+	for _, u := range cases {
+		raw := `{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"` + u + `"}}]}]}`
+		_, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
+		if err == nil {
+			t.Errorf("expected error for malformed data URI %q", u)
+		}
+	}
+}
+
+func TestUserMessageNonHTTPSchemeErrors(t *testing.T) {
+	raw := `{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"ftp://example.com/img.jpg"}}]}]}`
+	_, err := toGeminiRequest(unmarshalRequest(t, raw), nil)
+	if err == nil {
+		t.Error("expected error for ftp:// URL")
+	}
+}
+
+func TestFetchedUnsupportedMimeTypeErrors(t *testing.T) {
+	fetch := stubFetch("https://example.com/img.tiff", []byte("data"), "image/tiff")
+	raw := `{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.com/img.tiff"}}]}]}`
+	_, err := toGeminiRequest(unmarshalRequest(t, raw), fetch)
+	if err == nil {
+		t.Error("expected error for unsupported MIME type from fetch")
+	}
+}
+
+func TestInlineDataSerializesCorrectly(t *testing.T) {
+	part := geminiPart{
+		InlineData: &geminiInlineData{MimeType: "image/png", Data: "abc123"},
+	}
+	b, err := json.Marshal(part)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"inlineData"`) {
+		t.Errorf("missing inlineData in %s", s)
+	}
+	if !strings.Contains(s, `"mimeType":"image/png"`) {
+		t.Errorf("missing mimeType in %s", s)
+	}
+	if strings.Contains(s, `"text"`) {
+		t.Errorf("text field should be absent in %s", s)
 	}
 }
