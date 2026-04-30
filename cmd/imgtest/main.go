@@ -1,13 +1,13 @@
-// Manual smoke-test for the Anthropic image transform.
-// Usage: go run ./cmd/imgtest [image-url]
-// Defaults to a small public PNG if no URL is given.
-// Reads ANTHROPIC_API_KEY from the environment (or .env in the project root).
+// Manual smoke-test for image transforms.
+// Usage: go run ./cmd/imgtest [--provider anthropic|gemini] [image-url-or-data-uri]
+// Reads API keys from .env in the project root.
 package main
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,24 +17,63 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/marcoantonios1/costguard/internal/providers/anthropic"
+	"github.com/marcoantonios1/costguard/internal/providers/gemini"
 )
+
+type doer interface {
+	Do(ctx context.Context, req *http.Request) (*http.Response, error)
+}
 
 func main() {
 	_ = godotenv.Load(".env")
 
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if apiKey == "" {
-		fmt.Fprintln(os.Stderr, "ANTHROPIC_API_KEY is not set")
+	provider := flag.String("provider", "anthropic", "Provider to test: anthropic or gemini")
+	flag.Parse()
+
+	imageURL := flag.Arg(0)
+	if imageURL == "" {
+		imageURL = "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/240px-PNG_transparency_demonstration_1.png"
+	}
+
+	var client doer
+	var model string
+
+	switch *provider {
+	case "anthropic":
+		apiKey := os.Getenv("ANTHROPIC_API_KEY")
+		if apiKey == "" {
+			fmt.Fprintln(os.Stderr, "ANTHROPIC_API_KEY is not set")
+			os.Exit(1)
+		}
+		c, err := anthropic.NewClient(anthropic.ClientConfig{Name: "test", APIKey: apiKey})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "new anthropic client:", err)
+			os.Exit(1)
+		}
+		client = c
+		model = "claude-sonnet-4-6"
+
+	case "gemini":
+		apiKey := os.Getenv("GEMINI_API_KEY")
+		if apiKey == "" {
+			fmt.Fprintln(os.Stderr, "GEMINI_API_KEY is not set")
+			os.Exit(1)
+		}
+		c, err := gemini.NewClient(gemini.ClientConfig{Name: "test", APIKey: apiKey})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "new gemini client:", err)
+			os.Exit(1)
+		}
+		client = c
+		model = "gemini-2.5-flash"
+
+	default:
+		fmt.Fprintf(os.Stderr, "unknown provider %q; use anthropic or gemini\n", *provider)
 		os.Exit(1)
 	}
 
-	imageURL := "https://commons.wikimedia.org/wiki/Main_Page#/media/File:Ashy_Prinia_in_Ajodhya_Hills_July_2024_by_Tisha_Mukherjee_01.jpg"
-	if len(os.Args) > 1 {
-		imageURL = os.Args[1]
-	}
-
 	payload := map[string]any{
-		"model": "claude-sonnet-4-6",
+		"model": model,
 		"messages": []any{
 			map[string]any{
 				"role": "user",
@@ -50,17 +89,8 @@ func main() {
 	}
 
 	body, _ := json.MarshalIndent(payload, "", "  ")
-	fmt.Println("=== OpenAI-format request ===")
+	fmt.Printf("=== OpenAI-format request (provider: %s) ===\n", *provider)
 	fmt.Println(string(body))
-
-	client, err := anthropic.NewClient(anthropic.ClientConfig{
-		Name:   "test",
-		APIKey: apiKey,
-	})
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "new client:", err)
-		os.Exit(1)
-	}
 
 	u, _ := url.Parse("http://localhost/v1/chat/completions")
 	req, _ := http.NewRequestWithContext(
