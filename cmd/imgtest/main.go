@@ -1,5 +1,5 @@
 // Manual smoke-test for image transforms.
-// Usage: go run ./cmd/imgtest [--provider anthropic|gemini|openai] [image-url-or-data-uri]
+// Usage: go run ./cmd/imgtest [--provider anthropic|gemini|openai|openaicompat] [image-url-or-data-uri]
 // Reads API keys from .env in the project root.
 package main
 
@@ -19,6 +19,7 @@ import (
 	"github.com/marcoantonios1/costguard/internal/providers/anthropic"
 	"github.com/marcoantonios1/costguard/internal/providers/gemini"
 	"github.com/marcoantonios1/costguard/internal/providers/openai"
+	"github.com/marcoantonios1/costguard/internal/providers/openaicompat"
 )
 
 type doer interface {
@@ -28,7 +29,8 @@ type doer interface {
 func main() {
 	_ = godotenv.Load(".env")
 
-	provider := flag.String("provider", "anthropic", "Provider to test: anthropic, gemini, or openai")
+	provider := flag.String("provider", "anthropic", "Provider to test: anthropic, gemini, openai, or openaicompat")
+	allowMultimodal := flag.Bool("allow-multimodal", true, "For openaicompat: disable the multimodal guard and forward images")
 	flag.Parse()
 
 	imageURL := flag.Arg(0)
@@ -82,8 +84,21 @@ func main() {
 		client = c
 		model = "gpt-4o-mini"
 
+	case "openaicompat":
+		c, err := openaicompat.NewClient(openaicompat.ClientConfig{
+			Name:            "ollama",
+			BaseURL:         "http://localhost:11434",
+			AllowMultimodal: *allowMultimodal,
+		})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "new openaicompat client:", err)
+			os.Exit(1)
+		}
+		client = c
+		model = "gemma4:26b"
+
 	default:
-		fmt.Fprintf(os.Stderr, "unknown provider %q; use anthropic, gemini, or openai\n", *provider)
+		fmt.Fprintf(os.Stderr, "unknown provider %q; use anthropic, gemini, openai, or openaicompat\n", *provider)
 		os.Exit(1)
 	}
 

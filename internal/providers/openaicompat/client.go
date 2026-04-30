@@ -1,9 +1,11 @@
 package openaicompat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,17 +15,19 @@ import (
 )
 
 type ClientConfig struct {
-	Name    string
-	BaseURL string
-	APIKey  string
-	Timeout time.Duration
+	Name            string
+	BaseURL         string
+	APIKey          string
+	Timeout         time.Duration
+	AllowMultimodal bool
 }
 
 type Client struct {
-	name   string
-	base   *url.URL
-	apiKey string
-	hc     *http.Client
+	name            string
+	base            *url.URL
+	apiKey          string
+	hc              *http.Client
+	allowMultimodal bool
 }
 
 func NewClient(cfg ClientConfig) (*Client, error) {
@@ -47,10 +51,11 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	}
 
 	return &Client{
-		name:   cfg.Name,
-		base:   u,
-		apiKey: cfg.APIKey,
-		hc:     &http.Client{Timeout: to},
+		name:            cfg.Name,
+		base:            u,
+		apiKey:          cfg.APIKey,
+		hc:              &http.Client{Timeout: to},
+		allowMultimodal: cfg.AllowMultimodal,
 	}, nil
 }
 
@@ -59,6 +64,19 @@ func (a *Client) Name() string { return a.name }
 func (a *Client) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 	if req == nil {
 		return nil, fmt.Errorf("nil request")
+	}
+
+	if !a.allowMultimodal && req.Method == http.MethodPost && req.URL.Path == "/v1/chat/completions" {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		_ = req.Body.Close()
+		req.Body = io.NopCloser(bytes.NewReader(body))
+
+		if requestHasImageContent(body) {
+			return multimodalNotAllowedResponse(req), nil
+		}
 	}
 
 	upstreamURL := *a.base
@@ -82,6 +100,49 @@ func (a *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 	}
 
 	return a.hc.Do(upstreamReq)
+}
+
+func requestHasImageContent(body []byte) bool {
+	var req struct {
+		Messages []struct {
+			Content any `json:"content"`
+		} `json:"messages"`
+	}
+	if json.Unmarshal(body, &req) != nil {
+		return false
+	}
+	for _, msg := range req.Messages {
+		blocks, ok := msg.Content.([]any)
+		if !ok {
+			continue
+		}
+		for _, b := range blocks {
+			m, ok := b.(map[string]any)
+			if !ok {
+				continue
+			}
+			if m["type"] == "image_url" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func multimodalNotAllowedResponse(req *http.Request) *http.Response {
+	body, _ := json.Marshal(map[string]any{
+		"error": map[string]any{
+			"message": "this model may not support vision; set allow_multimodal: true on the provider config to enable image passthrough",
+			"type":    "invalid_request_error",
+		},
+	})
+	return &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Status:     "400 Bad Request",
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader(body)),
+		Request:    req,
+	}
 }
 
 func joinURLPath(a, b string) string {

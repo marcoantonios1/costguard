@@ -113,10 +113,11 @@ type GeminiProvider struct {
 }
 
 type OpenAICompatibleProvider struct {
-	BaseURL  string           `json:"base_url"`
-	APIKey   string           `json:"api_key"`
-	Timeout  time.Duration    `json:"timeout"`
-	Metadata ProviderMetadata `json:"metadata"`
+	BaseURL        string           `json:"base_url"`
+	APIKey         string           `json:"api_key"`
+	Timeout        time.Duration    `json:"timeout"`
+	AllowMultimodal bool            `json:"allow_multimodal"`
+	Metadata       ProviderMetadata `json:"metadata"`
 }
 
 type ProviderMetadata struct {
@@ -178,10 +179,11 @@ func Load(path string) (Config, error) {
 	}
 
 	type rawOpenAICompatibleProvider struct {
-		BaseURL  string              `json:"base_url"`
-		APIKey   string              `json:"api_key"`
-		Timeout  string              `json:"timeout"`
-		Metadata rawProviderMetadata `json:"metadata"`
+		BaseURL         string              `json:"base_url"`
+		APIKey          string              `json:"api_key"`
+		Timeout         string              `json:"timeout"`
+		AllowMultimodal bool               `json:"allow_multimodal"`
+		Metadata        rawProviderMetadata `json:"metadata"`
 	}
 
 	type rawReports struct {
@@ -348,10 +350,11 @@ func Load(path string) (Config, error) {
 		}
 
 		c.Providers.OpenAICompatible[name] = OpenAICompatibleProvider{
-			BaseURL:  p.BaseURL,
-			APIKey:   resolveEnvIfPresent(p.APIKey), // optional
-			Timeout:  to,
-			Metadata: normalizeProviderMetadata(p.Metadata),
+			BaseURL:         p.BaseURL,
+			APIKey:          resolveEnvIfPresent(p.APIKey), // optional
+			Timeout:         to,
+			AllowMultimodal: p.AllowMultimodal,
+			Metadata:        normalizeProviderMetadata(p.Metadata),
 		}
 	}
 
