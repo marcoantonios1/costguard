@@ -14,6 +14,7 @@ import (
 
 func (g *Gateway) maybeStoreAndReturn(
 	r *http.Request,
+	reqBodyBytes []byte,
 	resp *http.Response,
 	providerName, model string,
 	cacheable bool,
@@ -39,7 +40,7 @@ func (g *Gateway) maybeStoreAndReturn(
 	}
 	_ = resp.Body.Close()
 
-	g.meterResponse(r, providerName, model, body, false, resp.StatusCode)
+	g.meterResponse(r, reqBodyBytes, providerName, model, body, false, resp.StatusCode)
 
 	if !cacheable || g.cache == nil || g.cacheTTL <= 0 {
 		return &http.Response{

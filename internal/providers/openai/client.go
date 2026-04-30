@@ -60,7 +60,8 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	}, nil
 }
 
-func (a *Client) Name() string { return a.name }
+func (a *Client) Name() string   { return a.name }
+func (a *Client) Family() string { return "openai" }
 
 func (a *Client) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 	if req == nil {
