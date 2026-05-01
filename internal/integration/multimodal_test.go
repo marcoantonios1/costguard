@@ -1,23 +1,120 @@
 // Package integration_test multimodal tests exercise image input transforms
-// end-to-end across all provider adapters using httptest stubs — no real API
-// keys required.
+// and vision token metering end-to-end across all provider adapters using
+// httptest stubs — no real API keys required.
 package integration_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/marcoantonios1/costguard/internal/budget"
+	"github.com/marcoantonios1/costguard/internal/cache"
 	"github.com/marcoantonios1/costguard/internal/gateway"
 	"github.com/marcoantonios1/costguard/internal/providers"
 	anthropic_provider "github.com/marcoantonios1/costguard/internal/providers/anthropic"
 	gemini_provider "github.com/marcoantonios1/costguard/internal/providers/gemini"
 	openai_provider "github.com/marcoantonios1/costguard/internal/providers/openai"
 	openaicompat_provider "github.com/marcoantonios1/costguard/internal/providers/openaicompat"
+	openai_http "github.com/marcoantonios1/costguard/internal/server/openai"
+	"github.com/marcoantonios1/costguard/internal/usage"
 )
+
+// ---------------------------------------------------------------------------
+// Vision metering helpers
+// ---------------------------------------------------------------------------
+
+// accumulatingStore is an in-memory usage.Store that sums EstimatedCostUSD
+// across all saved records so budget.Service can query realistic spend.
+type accumulatingStore struct {
+	mu      sync.Mutex
+	records []usage.Record
+}
+
+func (s *accumulatingStore) Save(_ context.Context, r usage.Record) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.records = append(s.records, r)
+	return nil
+}
+
+func (s *accumulatingStore) totalCost() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var sum float64
+	for _, r := range s.records {
+		sum += r.EstimatedCostUSD
+	}
+	return sum
+}
+
+func (s *accumulatingStore) all() []usage.Record {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := make([]usage.Record, len(s.records))
+	copy(cp, s.records)
+	return cp
+}
+
+func (s *accumulatingStore) GetTotalSpend(_ context.Context, _, _ time.Time) (float64, error) {
+	return s.totalCost(), nil
+}
+func (s *accumulatingStore) GetSpendByTeam(_ context.Context, _, _ time.Time) ([]usage.TeamSpend, error) {
+	return nil, nil
+}
+func (s *accumulatingStore) GetSpendByProvider(_ context.Context, _, _ time.Time) ([]usage.ProviderSpend, error) {
+	return nil, nil
+}
+func (s *accumulatingStore) GetSpendByModel(_ context.Context, _, _ time.Time) ([]usage.ModelSpend, error) {
+	return nil, nil
+}
+func (s *accumulatingStore) GetSpendByProject(_ context.Context, _, _ time.Time) ([]usage.ProjectSpend, error) {
+	return nil, nil
+}
+func (s *accumulatingStore) GetSpendForTeam(_ context.Context, _ string, _, _ time.Time) (float64, error) {
+	return 0, nil
+}
+func (s *accumulatingStore) GetSpendForProject(_ context.Context, _ string, _, _ time.Time) (float64, error) {
+	return 0, nil
+}
+func (s *accumulatingStore) GetSpendForAgent(_ context.Context, _ string, _, _ time.Time) (float64, error) {
+	return 0, nil
+}
+func (s *accumulatingStore) GetSpendByAgent(_ context.Context, _, _ time.Time) ([]usage.AgentSpend, error) {
+	return nil, nil
+}
+
+// newHarnessWithBudget wires the gateway with an accumulatingStore and a
+// budget.Service configured with the given monthly limit (USD).
+func newHarnessWithBudget(reg *providers.Registry, monthlyUSD float64) (*httptest.Server, *accumulatingStore) {
+	store := &accumulatingStore{}
+	budgetSvc := budget.NewService(store, budget.Config{
+		Enabled:    true,
+		MonthlyUSD: monthlyUSD,
+	})
+
+	gw, err := gateway.New(gateway.Deps{
+		Router:        &staticRouter{},
+		Registry:      reg,
+		Cache:         cache.NewMemory(0), // no caching for budget tests
+		CacheTTL:      0,
+		UsageStore:    store,
+		BudgetChecker: budgetSvc,
+	})
+	if err != nil {
+		panic("gateway.New: " + err.Error())
+	}
+
+	mux := http.NewServeMux()
+	openai_http.Register(mux, openai_http.Deps{Gateway: gw})
+	return httptest.NewServer(mux), store
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -438,5 +535,233 @@ func TestMultimodal_CompatGuard_Allows(t *testing.T) {
 	}
 	if block.ImageURL == nil || block.ImageURL.URL != imageURL {
 		t.Errorf("image_url.url: got %v, want %q", block.ImageURL, imageURL)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Vision token metering helpers
+// ---------------------------------------------------------------------------
+
+func anthropicZeroUsageResponse() map[string]any {
+	return map[string]any{
+		"id": "msg_zero", "type": "message", "role": "assistant",
+		"model":       "claude-sonnet-4-5-20250929",
+		"content":     []any{map[string]any{"type": "text", "text": "I see an image."}},
+		"stop_reason": "end_turn",
+		"usage":       map[string]any{"input_tokens": 0, "output_tokens": 0},
+	}
+}
+
+func openAIZeroUsageResponse() map[string]any {
+	return map[string]any{
+		"id": "chatcmpl-zero", "object": "chat.completion",
+		"created": 1000003, "model": "gpt-4o-mini",
+		"choices": []any{map[string]any{
+			"index":         0,
+			"message":       map[string]any{"role": "assistant", "content": "I see an image."},
+			"finish_reason": "stop",
+		}},
+		"usage": map[string]any{"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+	}
+}
+
+func postToServer(t *testing.T, srv *httptest.Server, providerName string, body any) (int, []byte) {
+	t.Helper()
+	payload, _ := json.Marshal(body)
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/chat/completions", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(gateway.HeaderProviderHint, providerName)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, b
+}
+
+// ---------------------------------------------------------------------------
+// Vision token correction tests
+// ---------------------------------------------------------------------------
+
+// TestMultimodal_VisionTokenCorrection_Anthropic: upstream reports 0 tokens for a
+// vision request — gateway must apply the Anthropic tile formula and record the
+// corrected prompt token count in the usage store.
+func TestMultimodal_VisionTokenCorrection_Anthropic(t *testing.T) {
+	upstream, _ := captureUpstream(t, "/v1/messages", anthropicZeroUsageResponse())
+	defer upstream.Close()
+
+	client, _ := anthropic_provider.NewClient(anthropic_provider.ClientConfig{
+		Name: "fake-anthropic-vision", BaseURL: upstream.URL,
+		APIKey: "test-key", AnthropicVersion: "2023-06-01",
+	})
+	reg := providers.NewRegistry()
+	reg.Register("fake-anthropic-vision", client)
+	srv, store := newHarnessWithBudget(reg, 1000)
+	defer srv.Close()
+
+	status, _ := postToServer(t, srv, "fake-anthropic-vision",
+		imageOnlyPayload("claude-sonnet-4-5-20250929", "https://example.com/photo.png"))
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d", status)
+	}
+
+	records := store.all()
+	if len(records) == 0 {
+		t.Fatal("no usage records saved")
+	}
+	got := records[len(records)-1].PromptTokens
+	const want = 3125 // 1024×1024 default → 4 tiles → 4×765+65
+	if got != want {
+		t.Errorf("PromptTokens: got %d, want %d", got, want)
+	}
+}
+
+// TestMultimodal_VisionTokenCorrection_OpenAI: upstream reports 0 tokens for a
+// vision request — gateway must apply the OpenAI tile formula and record the
+// corrected prompt token count in the usage store.
+func TestMultimodal_VisionTokenCorrection_OpenAI(t *testing.T) {
+	upstream, _ := captureUpstream(t, "/v1/chat/completions", openAIZeroUsageResponse())
+	defer upstream.Close()
+
+	client, _ := openai_provider.NewClient(openai_provider.ClientConfig{
+		Name: "fake-openai-vision", BaseURL: upstream.URL, APIKey: "test-key",
+	})
+	reg := providers.NewRegistry()
+	reg.Register("fake-openai-vision", client)
+	srv, store := newHarnessWithBudget(reg, 1000)
+	defer srv.Close()
+
+	status, _ := postToServer(t, srv, "fake-openai-vision",
+		imageOnlyPayload("gpt-4o-mini", "https://example.com/photo.png"))
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d", status)
+	}
+
+	records := store.all()
+	if len(records) == 0 {
+		t.Fatal("no usage records saved")
+	}
+	got := records[len(records)-1].PromptTokens
+	const want = 765 // 1024×1024 → resize 768×768 → 4 tiles → 4×170+85
+	if got != want {
+		t.Errorf("PromptTokens: got %d, want %d", got, want)
+	}
+}
+
+// TestMultimodal_VisionTokenCorrection_NonZeroUnchanged: when the upstream
+// already reports a non-zero prompt token count the gateway must not overwrite
+// it with a client-side estimate.
+func TestMultimodal_VisionTokenCorrection_NonZeroUnchanged(t *testing.T) {
+	upstream, _ := captureUpstream(t, "/v1/chat/completions", openAITextResponse())
+	defer upstream.Close()
+
+	client, _ := openai_provider.NewClient(openai_provider.ClientConfig{
+		Name: "fake-openai-nonzero", BaseURL: upstream.URL, APIKey: "test-key",
+	})
+	reg := providers.NewRegistry()
+	reg.Register("fake-openai-nonzero", client)
+	srv, store := newHarnessWithBudget(reg, 1000)
+	defer srv.Close()
+
+	status, _ := postToServer(t, srv, "fake-openai-nonzero",
+		imageOnlyPayload("gpt-4o-mini", "https://example.com/photo.png"))
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d", status)
+	}
+
+	records := store.all()
+	if len(records) == 0 {
+		t.Fatal("no usage records saved")
+	}
+	got := records[len(records)-1].PromptTokens
+	const want = 150 // upstream reported 150 — correction must not apply
+	if got != want {
+		t.Errorf("PromptTokens: got %d, want %d (correction must not override non-zero upstream count)", got, want)
+	}
+}
+
+// TestMultimodal_Gemini_TrustsUpstreamTokens: Gemini reports image tokens in
+// usageMetadata; the gateway must not apply a client-side estimate for the
+// gemini family even when the upstream returns zero tokens.
+func TestMultimodal_Gemini_TrustsUpstreamTokens(t *testing.T) {
+	geminiZero := map[string]any{
+		"candidates": []any{map[string]any{
+			"content": map[string]any{
+				"role":  "model",
+				"parts": []any{map[string]any{"text": "I see an image."}},
+			},
+			"finishReason": "STOP",
+		}},
+		"usageMetadata": map[string]any{
+			"promptTokenCount": 0, "candidatesTokenCount": 0, "totalTokenCount": 0,
+		},
+		"modelVersion": "gemini-2.5-flash",
+	}
+
+	upstream, _ := captureUpstream(t, "/v1beta/models/", geminiZero)
+	defer upstream.Close()
+
+	client, _ := gemini_provider.NewClient(gemini_provider.ClientConfig{
+		Name: "fake-gemini-vision", BaseURL: upstream.URL, APIKey: "test-key",
+	})
+	reg := providers.NewRegistry()
+	reg.Register("fake-gemini-vision", client)
+	srv, store := newHarnessWithBudget(reg, 1000)
+	defer srv.Close()
+
+	status, _ := postToServer(t, srv, "fake-gemini-vision",
+		imageOnlyPayload("gemini-2.5-flash", "data:image/png;base64,abc123"))
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d", status)
+	}
+
+	records := store.all()
+	if len(records) == 0 {
+		t.Fatal("no usage records saved")
+	}
+	got := records[len(records)-1].PromptTokens
+	if got != 0 {
+		t.Errorf("PromptTokens: got %d, want 0 — Gemini tokens must not be client-estimated", got)
+	}
+}
+
+// TestMultimodal_BudgetBlocks_AfterVisionMetering: after a vision request is
+// metered (with the client-side token estimate adding cost), a subsequent
+// request must be blocked with 402 when the recorded spend exceeds the budget.
+func TestMultimodal_BudgetBlocks_AfterVisionMetering(t *testing.T) {
+	upstream, _ := captureUpstream(t, "/v1/messages", anthropicZeroUsageResponse())
+	defer upstream.Close()
+
+	// Provider name starts with "anthropic" so NormalizeProvider → "anthropic",
+	// enabling a real price lookup and non-zero EstimatedCostUSD in the store.
+	client, _ := anthropic_provider.NewClient(anthropic_provider.ClientConfig{
+		Name: "anthropic-budget", BaseURL: upstream.URL,
+		APIKey: "test-key", AnthropicVersion: "2023-06-01",
+	})
+	reg := providers.NewRegistry()
+	reg.Register("anthropic-budget", client)
+
+	// Budget smaller than the cost of one vision request:
+	// 3125 tokens × ($0.75/1M) ≈ $0.0000023 > $0.000001
+	srv, store := newHarnessWithBudget(reg, 0.000001)
+	defer srv.Close()
+
+	// First request: budget not yet exceeded — must succeed.
+	status1, _ := postToServer(t, srv, "anthropic-budget",
+		imageOnlyPayload("claude-sonnet-4-5-20250929", "https://example.com/photo.png"))
+	if status1 != http.StatusOK {
+		t.Fatalf("first request: expected 200, got %d", status1)
+	}
+
+	if store.totalCost() <= 0 {
+		t.Fatal("expected non-zero cost after first vision request")
+	}
+
+	// Second request: spend now exceeds budget → must return 402.
+	status2, body2 := postToServer(t, srv, "anthropic-budget",
+		imageOnlyPayload("claude-sonnet-4-5-20250929", "https://example.com/photo.png"))
+	if status2 != http.StatusPaymentRequired {
+		t.Errorf("second request: expected 402 after budget exceeded, got %d\nbody: %s", status2, body2)
 	}
 }

@@ -6,9 +6,30 @@ import (
 	"time"
 
 	"github.com/marcoantonios1/costguard/internal/metering"
+	"github.com/marcoantonios1/costguard/internal/providers"
+	"github.com/marcoantonios1/costguard/internal/providers/openaiformat"
 	"github.com/marcoantonios1/costguard/internal/server"
 	"github.com/marcoantonios1/costguard/internal/usage"
 )
+
+// estimateVisionTokens returns a client-side image token estimate for the
+// request body, dispatched by provider family. Returns 0 for providers that
+// report image tokens in their usage response (gemini) or have no estimation
+// formula (openaicompat).
+func estimateVisionTokens(p providers.Provider, reqBody []byte) int {
+	images := openaiformat.ExtractRequestImages(reqBody)
+	if len(images) == 0 {
+		return 0
+	}
+	switch p.Family() {
+	case "anthropic":
+		return openaiformat.AnthropicImageTokens(images)
+	case "openai":
+		return openaiformat.OpenAIImageTokens(images)
+	default:
+		return 0
+	}
+}
 
 func extractModel(body []byte) string {
 	var v struct {
@@ -22,6 +43,7 @@ func extractModel(body []byte) string {
 
 func (g *Gateway) meterResponse(
 	r *http.Request,
+	reqBodyBytes []byte,
 	providerName string,
 	model string,
 	body []byte,
@@ -130,6 +152,14 @@ func (g *Gateway) meterResponse(
 			})
 		}
 		return
+	}
+
+	// Vision token correction: if the upstream did not report any prompt tokens
+	// and the request contained image blocks, add a client-side estimate so
+	// that budget accounting reflects the true vision cost.
+	if estimate := estimateVisionTokens(p, reqBodyBytes); estimate > 0 && meta.PromptTokens == 0 {
+		meta.PromptTokens = estimate
+		meta.TotalTokens = estimate + meta.CompletionTokens
 	}
 
 	finalModel := meta.Model

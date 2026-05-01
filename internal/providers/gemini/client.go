@@ -58,7 +58,8 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) Name() string { return c.name }
+func (c *Client) Name() string   { return c.name }
+func (c *Client) Family() string { return "gemini" }
 
 func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 	if req == nil {

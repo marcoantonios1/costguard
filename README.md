@@ -99,6 +99,32 @@ Full multi-turn tool calling is supported on Anthropic and Gemini. Requests use 
 
 Server-sent events (SSE) streaming is supported on all providers. Set `"stream": true` in the request body.
 
+### Vision & Multimodal
+
+Send image content using the standard OpenAI `image_url` format — Costguard translates it to each provider's native wire format (Anthropic `source` blocks, Gemini `inlineData` parts).
+
+**Provider support:**
+
+| Provider | Image inputs | Token estimation |
+|---|---|---|
+| OpenAI | ✅ | tile-based (detail level) |
+| Anthropic | ✅ | tile-based (Anthropic formula) |
+| Gemini | ✅ | trusts `usageMetadata` |
+| OpenAI-compatible (Ollama, vLLM) | opt-in | — |
+
+Because some providers do not include image tokens in their usage response, Costguard estimates vision tokens client-side and adds them to the recorded prompt token count. This ensures budget enforcement accounts for the true cost of vision requests. The estimate is only applied when the upstream returns zero prompt tokens.
+
+OpenAI-compatible providers (Ollama, vLLM) reject image content by default. Set `allow_multimodal: true` on the provider to pass image blocks through:
+
+```json
+"openai_compatible": {
+  "local_ollama": {
+    "base_url": "http://host.docker.internal:11434",
+    "allow_multimodal": true
+  }
+}
+```
+
 ### Per-Agent Cost Tracking
 
 Tag requests with `X-Costguard-Agent` to track and limit spend per agent or automated pipeline.
@@ -250,6 +276,59 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 ```
 
 Note: streaming responses are not cached.
+
+---
+
+## Vision & Multimodal
+
+Send images using the standard OpenAI multipart content format. Costguard transforms the request to each provider's native format automatically.
+
+**Example: image URL**
+
+```bash
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4-6",
+    "messages": [{
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "What is in this image?"},
+        {"type": "image_url", "image_url": {"url": "https://example.com/photo.png"}}
+      ]
+    }]
+  }'
+```
+
+**Example: base64 data URI**
+
+```bash
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o",
+    "messages": [{
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "Describe this chart."},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,<base64data>", "detail": "high"}}
+      ]
+    }]
+  }'
+```
+
+The `detail` field (`"low"`, `"high"`, `"auto"`) is used for OpenAI token estimation and forwarded as-is to OpenAI. It is ignored for other providers.
+
+**Vision token estimation:**
+
+Costguard estimates image tokens client-side for Anthropic and OpenAI when the upstream response reports zero prompt tokens, ensuring budget enforcement reflects the true cost:
+
+| Provider | Formula |
+|---|---|
+| Anthropic | Resize to 1568×1568 → count 512px tiles → `tiles × 765 + 65` per image |
+| OpenAI `detail=low` | 85 tokens flat |
+| OpenAI `detail=high/auto` | Fit within 2048px → scale shortest side to 768px → count 512px tiles → `tiles × 170 + 85` |
+| Gemini | Trusts `usageMetadata.promptTokenCount` from the upstream response |
 
 ---
 
@@ -531,9 +610,10 @@ Common HTTP status codes:
     },
     "openai_compatible": {
       "local_ollama": {
-        "base_url": "http://host.docker.internal:11434",
-        "api_key":  "",
-        "timeout":  "60s",
+        "base_url":        "http://host.docker.internal:11434",
+        "api_key":         "",
+        "timeout":         "60s",
+        "allow_multimodal": false,
         "metadata": {
           "kind": "local",
           "supports_tools":      false,
@@ -560,6 +640,12 @@ Common HTTP status codes:
 | `supports_embeddings` | bool | Provider has an embeddings endpoint |
 | `priority` | int | Higher = preferred when multiple providers match |
 | `tags` | string[] | Arbitrary labels for filtering or display |
+
+### OpenAI-compatible provider fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `allow_multimodal` | bool | `false` | Pass image content blocks through to the upstream. Off by default because many local models do not support vision; requests containing images return `400` when this is `false`. |
 
 ---
 
@@ -597,10 +683,11 @@ costguard/
 │   ├── gateway/               # request pipeline (routing, caching, metering, streaming)
 │   ├── logging/               # structured logging
 │   ├── providers/             # provider abstractions and catalog
-│   │   ├── anthropic/         # Anthropic adapter (tools + streaming)
-│   │   ├── gemini/            # Gemini adapter (tools + streaming)
-│   │   ├── openai/            # OpenAI adapter
-│   │   └── openaicompat/      # Generic OpenAI-compatible adapter (Ollama, vLLM)
+│   │   ├── anthropic/         # Anthropic adapter (tools + streaming + vision)
+│   │   ├── gemini/            # Gemini adapter (tools + streaming + vision)
+│   │   ├── openai/            # OpenAI adapter (vision)
+│   │   ├── openaicompat/      # Generic OpenAI-compatible adapter (Ollama, vLLM)
+│   │   └── openaiformat/      # Shared request parsing and vision token estimation
 │   ├── router/                # model → provider routing logic
 │   ├── server/                # HTTP infrastructure, admin API
 │   └── usage/                 # usage records and spend queries
@@ -622,6 +709,7 @@ costguard/
 - [x] Tool calling (OpenAI, Anthropic, Gemini)
 - [x] Streaming (all providers)
 - [x] Agent integration (X-Costguard-Agent, per-agent budget, usage API)
+- [x] Vision & multimodal (image inputs on all providers, client-side token estimation, budget enforcement)
 - [ ] Smart routing (cost/performance optimization)
 - [ ] Semantic caching
 

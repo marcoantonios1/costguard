@@ -192,7 +192,7 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 				})
 			}
 
-			g.meterResponse(r, providerName, effectiveModel, entry.Body, true, http.StatusOK)
+			g.meterResponse(r, effectiveBodyBytes, providerName, effectiveModel, entry.Body, true, http.StatusOK)
 
 			if g.log != nil {
 				g.log.Info("routing_result", map[string]any{
@@ -347,5 +347,5 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 		})
 	}
 
-	return g.maybeStoreAndReturn(r, resp, actualProvider, finalModel, cacheable, cacheKey)
+	return g.maybeStoreAndReturn(r, effectiveBodyBytes, resp, actualProvider, finalModel, cacheable, cacheKey)
 }

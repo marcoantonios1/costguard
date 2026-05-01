@@ -22,6 +22,9 @@ type ErrorBody struct {
 
 type Provider interface {
 	Name() string
+	// Family returns the provider's API family ("anthropic", "openai", "gemini",
+	// "openaicompat"). Used for provider-specific logic such as vision token estimation.
+	Family() string
 	Do(ctx context.Context, req *http.Request) (*http.Response, error)
 
 	// Parse normalized usage/model info from a successful provider response body.
