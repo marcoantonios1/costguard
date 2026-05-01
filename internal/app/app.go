@@ -60,6 +60,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 				Tags:               append([]string(nil), p.Metadata.Tags...),
 				Enabled:            false,
 				SkipReason:         "missing_base_url",
+				CheckedAt:          time.Now(),
 			})
 
 			log.Info("skip_provider_missing_base_url", map[string]any{
@@ -86,6 +87,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 				Tags:               append([]string(nil), p.Metadata.Tags...),
 				Enabled:            false,
 				SkipReason:         "missing_api_key",
+				CheckedAt:          time.Now(),
 			})
 
 			log.Info("skip_provider_missing_api_key", map[string]any{
@@ -130,6 +132,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 			Priority:           p.Metadata.Priority,
 			Tags:               append([]string(nil), p.Metadata.Tags...),
 			Enabled:            true,
+			CheckedAt:          time.Now(),
 		})
 
 		log.Info("provider_enabled", map[string]any{
@@ -164,6 +167,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 				Tags:               append([]string(nil), p.Metadata.Tags...),
 				Enabled:            false,
 				SkipReason:         "missing_base_url",
+				CheckedAt:          time.Now(),
 			})
 			log.Info("skip_provider_missing_base_url", map[string]any{
 				"name":          name,
@@ -189,6 +193,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 				Tags:               append([]string(nil), p.Metadata.Tags...),
 				Enabled:            false,
 				SkipReason:         "missing_api_key",
+				CheckedAt:          time.Now(),
 			})
 			log.Info("skip_provider_missing_api_key", map[string]any{
 				"name":          name,
@@ -231,6 +236,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 			Priority:           p.Metadata.Priority,
 			Tags:               append([]string(nil), p.Metadata.Tags...),
 			Enabled:            true,
+			CheckedAt:          time.Now(),
 		})
 
 		log.Info("provider_enabled", map[string]any{
@@ -265,6 +271,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 				Tags:               append([]string(nil), p.Metadata.Tags...),
 				Enabled:            false,
 				SkipReason:         "missing_base_url",
+				CheckedAt:          time.Now(),
 			})
 			log.Info("skip_provider_missing_base_url", map[string]any{
 				"name":          name,

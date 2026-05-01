@@ -39,6 +39,7 @@ func Register(mux *http.ServeMux, d Deps) {
 
 	if d.ProviderCatalog != nil {
 		mux.HandleFunc("/providers", ProvidersHandler(d.ProviderCatalog))
+		mux.HandleFunc("/providers/health", ProviderHealthHandler(d.ProviderCatalog))
 	}
 
 	if d.ModeToProvider != nil {
