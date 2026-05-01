@@ -20,6 +20,7 @@ type ClientConfig struct {
 	APIKey          string
 	Timeout         time.Duration
 	AllowMultimodal bool
+	SupportTools    bool
 }
 
 type Client struct {
@@ -28,6 +29,7 @@ type Client struct {
 	apiKey          string
 	hc              *http.Client
 	allowMultimodal bool
+	supportTools    bool
 }
 
 func NewClient(cfg ClientConfig) (*Client, error) {
@@ -56,6 +58,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		apiKey:          cfg.APIKey,
 		hc:              &http.Client{Timeout: to},
 		allowMultimodal: cfg.AllowMultimodal,
+		supportTools:    cfg.SupportTools,
 	}, nil
 }
 
@@ -67,7 +70,7 @@ func (a *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 		return nil, fmt.Errorf("nil request")
 	}
 
-	if !a.allowMultimodal && req.Method == http.MethodPost && req.URL.Path == "/v1/chat/completions" {
+	if (!a.allowMultimodal || !a.supportTools) && req.Method == http.MethodPost && req.URL.Path == "/v1/chat/completions" {
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
 			return nil, err
@@ -75,8 +78,11 @@ func (a *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 		_ = req.Body.Close()
 		req.Body = io.NopCloser(bytes.NewReader(body))
 
-		if requestHasImageContent(body) {
+		if !a.allowMultimodal && requestHasImageContent(body) {
 			return multimodalNotAllowedResponse(req), nil
+		}
+		if !a.supportTools && requestHasToolCalls(body) {
+			return toolsNotAllowedResponse(req), nil
 		}
 	}
 
@@ -134,6 +140,32 @@ func multimodalNotAllowedResponse(req *http.Request) *http.Response {
 	body, _ := json.Marshal(map[string]any{
 		"error": map[string]any{
 			"message": "this model may not support vision; set allow_multimodal: true on the provider config to enable image passthrough",
+			"type":    "invalid_request_error",
+		},
+	})
+	return &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Status:     "400 Bad Request",
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader(body)),
+		Request:    req,
+	}
+}
+
+func requestHasToolCalls(body []byte) bool {
+	var req struct {
+		Tools []any `json:"tools"`
+	}
+	if json.Unmarshal(body, &req) != nil {
+		return false
+	}
+	return len(req.Tools) > 0
+}
+
+func toolsNotAllowedResponse(req *http.Request) *http.Response {
+	body, _ := json.Marshal(map[string]any{
+		"error": map[string]any{
+			"message": "this provider does not support tool calling; set supports_tools: true on the provider config to enable",
 			"type":    "invalid_request_error",
 		},
 	})
