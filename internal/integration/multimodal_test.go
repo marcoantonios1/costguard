@@ -711,7 +711,7 @@ func TestMultimodal_Gemini_TrustsUpstreamTokens(t *testing.T) {
 	defer srv.Close()
 
 	status, _ := postToServer(t, srv, "fake-gemini-vision",
-		imageOnlyPayload("gemini-2.5-flash", "https://example.com/photo.png"))
+		imageOnlyPayload("gemini-2.5-flash", "data:image/png;base64,abc123"))
 	if status != http.StatusOK {
 		t.Fatalf("expected 200, got %d", status)
 	}
