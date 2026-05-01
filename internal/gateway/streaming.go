@@ -25,7 +25,13 @@ func isStreamingResponse(resp *http.Response) bool {
 // usage chunk.
 func (g *Gateway) passthroughStreaming(r *http.Request, resp *http.Response, providerName, model string, reqBodyBytes []byte) *http.Response {
 	promptEstimate := len(reqBodyBytes) / 4
-	meter := newStreamMeter(resp.Body, model, promptEstimate, func(finalModel string, prompt, completion, total int, estimated bool) {
+
+	visionEstimate := 0
+	if p, err := g.reg.Get(providerName); err == nil {
+		visionEstimate = estimateVisionTokens(p, reqBodyBytes)
+	}
+
+	meter := newStreamMeter(resp.Body, model, promptEstimate, visionEstimate, func(finalModel string, prompt, completion, total int, estimated bool) {
 		go g.meterStreamingUsage(r, providerName, finalModel, prompt, completion, total, estimated)
 	})
 

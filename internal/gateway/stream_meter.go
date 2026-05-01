@@ -13,22 +13,28 @@ import (
 // without allocating an extra copy for the caller. When the stream ends —
 // via [DONE], EOF, or Close — it fires onDone exactly once.
 //
-// If the stream ends without any usage chunk (e.g. Gemini SSE), onDone
-// receives a client-side fallback estimate and estimated=true:
+// Token accounting at finish time (applied in order):
 //
-//	completion ≈ accumulated content bytes / 4
-//	prompt     = promptEstimate supplied at construction time
+//  1. If the stream contained a usage chunk with total > 0 (real counts):
+//     - if promptTokens == 0 and visionEstimate > 0, add visionEstimate to
+//       promptTokens (same guard as the non-streaming path).
+//
+//  2. If the stream ended with total == 0 (no usage chunk, e.g. Gemini SSE):
+//     - Apply fallback: completion ≈ accumulatedTextLen/4,
+//       prompt = promptEstimate + visionEstimate (unconditional).
+//     - Sets estimated=true in the onDone callback.
 type StreamMeter struct {
-	src            io.ReadCloser
-	lineBuf        []byte
-	promptEstimate int
+	src             io.ReadCloser
+	lineBuf         []byte
+	promptEstimate  int
+	visionEstimate  int
 
-	mu                  sync.Mutex
-	model               string
-	promptTokens        int
-	completionTokens    int
-	totalTokens         int
-	accumulatedTextLen  int
+	mu                 sync.Mutex
+	model              string
+	promptTokens       int
+	completionTokens   int
+	totalTokens        int
+	accumulatedTextLen int
 
 	doneOnce sync.Once
 	onDone   func(model string, prompt, completion, total int, estimated bool)
@@ -38,12 +44,14 @@ func newStreamMeter(
 	src io.ReadCloser,
 	initialModel string,
 	promptEstimate int,
+	visionEstimate int,
 	onDone func(string, int, int, int, bool),
 ) *StreamMeter {
 	return &StreamMeter{
 		src:            src,
 		model:          initialModel,
 		promptEstimate: promptEstimate,
+		visionEstimate: visionEstimate,
 		onDone:         onDone,
 	}
 }
@@ -74,11 +82,20 @@ func (sm *StreamMeter) finish() {
 		model := sm.model
 		prompt, completion, total := sm.promptTokens, sm.completionTokens, sm.totalTokens
 		estimated := false
+
 		if total == 0 {
+			// No usage chunk in stream (e.g. Gemini): apply fallback estimation.
+			// Vision estimate is added unconditionally to the fallback prompt.
 			completion = sm.accumulatedTextLen / 4
-			prompt = sm.promptEstimate
+			prompt = sm.promptEstimate + sm.visionEstimate
 			total = prompt + completion
 			estimated = true
+		} else if prompt == 0 && sm.visionEstimate > 0 {
+			// Real usage reported but prompt tokens were omitted (some providers
+			// zero out prompt in streaming). Add the vision estimate and recompute
+			// total — same guard as the non-streaming meterResponse path.
+			prompt = sm.visionEstimate
+			total = prompt + completion
 		}
 		sm.mu.Unlock()
 		sm.onDone(model, prompt, completion, total, estimated)
