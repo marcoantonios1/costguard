@@ -142,11 +142,12 @@
         "base_url": "http://host.docker.internal:11434",
         "api_key": "",
         "timeout": "60s",
+        "allow_multimodal": true,
         "metadata": {
           "kind": "local",
           "supports_tools": true,
           "supports_streaming": true,
-          "supports_vision": false,
+          "supports_vision": true,
           "supports_embeddings": false,
           "priority": 50,
           "tags": ["cheap", "private", "local"]
@@ -156,6 +157,7 @@
         "base_url": "http://host.docker.internal:8000",
         "api_key": "",
         "timeout": "60s",
+        "allow_multimodal": false,
         "metadata": {
           "kind": "local",
           "supports_tools": false,
