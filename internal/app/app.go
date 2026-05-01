@@ -379,6 +379,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 			APIKey:          p.APIKey,
 			Timeout:         p.Timeout,
 			AllowMultimodal: p.AllowMultimodal,
+			SupportTools:    p.Metadata.SupportsTools,
 		})
 		if err != nil {
 			log.Error("failed_to_create_openai_compatible_client", map[string]any{

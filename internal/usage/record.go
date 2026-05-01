@@ -10,9 +10,10 @@ type Record struct {
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
-	EstimatedCostUSD float64
-	PriceFound       bool
-	CacheHit         bool
+	EstimatedCostUSD  float64
+	PriceFound        bool
+	CacheHit          bool
+	MeteringEstimated bool
 	Team             string
 	Project          string
 	User             string

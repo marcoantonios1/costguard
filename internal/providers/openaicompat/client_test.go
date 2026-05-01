@@ -164,6 +164,20 @@ func compatClient(t *testing.T, srvURL string, allowMultimodal bool) *Client {
 	return c
 }
 
+func compatClientWithTools(t *testing.T, srvURL string, allowMultimodal, supportTools bool) *Client {
+	t.Helper()
+	c, err := NewClient(ClientConfig{
+		Name:            "test",
+		BaseURL:         srvURL,
+		AllowMultimodal: allowMultimodal,
+		SupportTools:    supportTools,
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	return c
+}
+
 func compatRequest(t *testing.T, srvURL, payload string) *http.Request {
 	t.Helper()
 	u, _ := url.Parse(srvURL + "/v1/chat/completions")
@@ -335,6 +349,145 @@ func TestGuard_NonChatPathNotGuarded(t *testing.T) {
 
 	// Even with allowMultimodal=false, non-chat paths are not inspected.
 	client := compatClient(t, srv.URL, false)
+	u, _ := url.Parse(srv.URL + "/v1/models")
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, u.String(), nil)
+
+	resp, err := client.Do(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200", resp.StatusCode)
+	}
+	_ = received
+}
+
+// ---------------------------------------------------------------------------
+// tools guard
+// ---------------------------------------------------------------------------
+
+const toolsPayload = `{"model":"llama3","messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"get_weather","description":"Get weather","parameters":{"type":"object","properties":{}}}}]}`
+const noToolsPayload = `{"model":"llama3","messages":[{"role":"user","content":"hello"}]}`
+
+func TestGuard_ToolsRejectedByDefault(t *testing.T) {
+	var received []byte
+	srv := compatStubServer(t, &received)
+	defer srv.Close()
+
+	client := compatClientWithTools(t, srv.URL, false, false)
+
+	resp, err := client.Do(context.Background(), compatRequest(t, srv.URL, toolsPayload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
+	if len(received) != 0 {
+		t.Errorf("upstream should not have been called, got body: %s", received)
+	}
+
+	var errBody struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+		} `json:"error"`
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(body, &errBody); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if errBody.Error.Type != "invalid_request_error" {
+		t.Errorf("error type: got %q, want invalid_request_error", errBody.Error.Type)
+	}
+	if errBody.Error.Message == "" {
+		t.Error("error message should not be empty")
+	}
+}
+
+func TestGuard_ToolsAllowedWhenSupportToolsEnabled(t *testing.T) {
+	var received []byte
+	srv := compatStubServer(t, &received)
+	defer srv.Close()
+
+	client := compatClientWithTools(t, srv.URL, false, true)
+
+	resp, err := client.Do(context.Background(), compatRequest(t, srv.URL, toolsPayload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200", resp.StatusCode)
+	}
+	if string(received) != toolsPayload {
+		t.Errorf("upstream received wrong body\ngot:  %s\nwant: %s", received, toolsPayload)
+	}
+}
+
+func TestGuard_NoToolsAlwaysForwarded(t *testing.T) {
+	var received []byte
+	srv := compatStubServer(t, &received)
+	defer srv.Close()
+
+	// supportTools=false, but no tools in the request — must pass through.
+	client := compatClientWithTools(t, srv.URL, false, false)
+
+	resp, err := client.Do(context.Background(), compatRequest(t, srv.URL, noToolsPayload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200", resp.StatusCode)
+	}
+	if string(received) != noToolsPayload {
+		t.Errorf("body changed in transit: %s", received)
+	}
+}
+
+func TestGuard_ImageRejectedBeforeToolsCheck(t *testing.T) {
+	// When both guards are off and the request has both an image and tools,
+	// the multimodal guard fires first (checked first in Do).
+	var received []byte
+	srv := compatStubServer(t, &received)
+	defer srv.Close()
+
+	client := compatClientWithTools(t, srv.URL, false, false)
+	mixedPayload := `{"model":"llava","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.com/img.png"}}]}],"tools":[{"type":"function","function":{"name":"f","description":"d","parameters":{}}}]}`
+
+	resp, err := client.Do(context.Background(), compatRequest(t, srv.URL, mixedPayload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
+	if len(received) != 0 {
+		t.Errorf("upstream should not have been called")
+	}
+}
+
+func TestGuard_ToolsGuardSkippedOnNonChatPath(t *testing.T) {
+	var received []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		received = body
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+	}))
+	defer srv.Close()
+
+	// supportTools=false, but path is /v1/models — guard must not fire.
+	client := compatClientWithTools(t, srv.URL, false, false)
 	u, _ := url.Parse(srv.URL + "/v1/models")
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, u.String(), nil)
 

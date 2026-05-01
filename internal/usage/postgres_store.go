@@ -33,9 +33,10 @@ func (s *PostgresStore) Save(ctx context.Context, r Record) error {
 			user_name,
 			agent,
 			path,
-			status_code
+			status_code,
+			metering_estimated
 		) VALUES (
-			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
+			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17
 		)
 	`,
 		r.RequestID,
@@ -54,6 +55,7 @@ func (s *PostgresStore) Save(ctx context.Context, r Record) error {
 		nullIfEmpty(r.Agent),
 		r.Path,
 		r.StatusCode,
+		r.MeteringEstimated,
 	)
 
 	return err
