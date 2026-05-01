@@ -31,7 +31,7 @@ func (g *Gateway) maybeStoreAndReturn(
 	// Streaming responses must not be buffered. Pass them through directly and
 	// meter asynchronously after the stream is consumed.
 	if isStreamingResponse(resp) {
-		return g.passthroughStreaming(r, resp, providerName, model), nil
+		return g.passthroughStreaming(r, resp, providerName, model, reqBodyBytes), nil
 	}
 
 	body, err := io.ReadAll(resp.Body)

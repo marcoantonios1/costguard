@@ -19,9 +19,14 @@ func isStreamingResponse(resp *http.Response) bool {
 // immediately. The StreamMeter inspects SSE chunks as the handler reads
 // through them, then fires meterStreamingUsage in a goroutine once the
 // stream ends — no extra goroutine or pipe needed for data forwarding.
-func (g *Gateway) passthroughStreaming(r *http.Request, resp *http.Response, providerName, model string) *http.Response {
-	meter := newStreamMeter(resp.Body, model, func(finalModel string, prompt, completion, total int) {
-		go g.meterStreamingUsage(r, providerName, finalModel, prompt, completion, total)
+//
+// reqBodyBytes is the original request body (pre-provider-transform). Its
+// length is used as a prompt token estimate when the stream ends without a
+// usage chunk.
+func (g *Gateway) passthroughStreaming(r *http.Request, resp *http.Response, providerName, model string, reqBodyBytes []byte) *http.Response {
+	promptEstimate := len(reqBodyBytes) / 4
+	meter := newStreamMeter(resp.Body, model, promptEstimate, func(finalModel string, prompt, completion, total int, estimated bool) {
+		go g.meterStreamingUsage(r, providerName, finalModel, prompt, completion, total, estimated)
 	})
 
 	return &http.Response{
@@ -33,7 +38,7 @@ func (g *Gateway) passthroughStreaming(r *http.Request, resp *http.Response, pro
 	}
 }
 
-func (g *Gateway) meterStreamingUsage(r *http.Request, providerName, model string, promptTokens, completionTokens, totalTokens int) {
+func (g *Gateway) meterStreamingUsage(r *http.Request, providerName, model string, promptTokens, completionTokens, totalTokens int, estimated bool) {
 	// Use a detached context so metering completes even after the HTTP
 	// response is fully sent and the request context is cancelled.
 	ctx := context.WithoutCancel(r.Context())
@@ -65,6 +70,9 @@ func (g *Gateway) meterStreamingUsage(r *http.Request, providerName, model strin
 		"cache_hit":         false,
 		"agent":             agent,
 	}
+	if estimated {
+		fields["metering_estimated"] = true
+	}
 	if priceFound {
 		fields["estimated_cost_usd"] = cost
 	} else {
@@ -78,22 +86,23 @@ func (g *Gateway) meterStreamingUsage(r *http.Request, providerName, model strin
 
 	if g.usageStore != nil {
 		record := usage.Record{
-			RequestID:        requestID,
-			Timestamp:        time.Now().UTC(),
-			Provider:         providerName,
-			Model:            model,
-			PromptTokens:     promptTokens,
-			CompletionTokens: completionTokens,
-			TotalTokens:      totalTokens,
-			EstimatedCostUSD: cost,
-			PriceFound:       priceFound,
-			CacheHit:         false,
-			Team:             team,
-			Project:          project,
-			User:             user,
-			Agent:            agent,
-			Path:             r.URL.Path,
-			StatusCode:       http.StatusOK,
+			RequestID:         requestID,
+			Timestamp:         time.Now().UTC(),
+			Provider:          providerName,
+			Model:             model,
+			PromptTokens:      promptTokens,
+			CompletionTokens:  completionTokens,
+			TotalTokens:       totalTokens,
+			EstimatedCostUSD:  cost,
+			PriceFound:        priceFound,
+			CacheHit:          false,
+			MeteringEstimated: estimated,
+			Team:              team,
+			Project:           project,
+			User:              user,
+			Agent:             agent,
+			Path:              r.URL.Path,
+			StatusCode:        http.StatusOK,
 		}
 		if err := g.usageStore.Save(ctx, record); err != nil && g.log != nil {
 			g.log.Error("usage_save_failed", map[string]any{
