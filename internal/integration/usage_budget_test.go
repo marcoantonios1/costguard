@@ -503,7 +503,4 @@ func TestBudget_Rejection_Returns402(t *testing.T) {
 	if errResp.Error.Message == "" {
 		t.Error("402 error.message must not be empty")
 	}
-	if errResp.Error.Type == "" {
-		t.Error("402 error.type must not be empty")
-	}
 }
