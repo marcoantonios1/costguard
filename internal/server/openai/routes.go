@@ -6,6 +6,7 @@ import "net/http"
 // It lets the gateway own routing/cache/metering/provider selection.
 type Gateway interface {
 	Proxy(r *http.Request) (*http.Response, error)
+	ProxyAudio(r *http.Request) (*http.Response, error)
 }
 
 type Deps struct {
@@ -20,4 +21,5 @@ func Register(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("/v1/chat/completions", h.chatCompletions)
 	mux.HandleFunc("/v1/embeddings", h.embeddings)
 	mux.HandleFunc("/v1/responses", h.responses)
+	mux.HandleFunc("/v1/audio/transcriptions", h.audioTranscriptions)
 }
