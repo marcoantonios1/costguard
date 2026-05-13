@@ -7,6 +7,7 @@ import "net/http"
 type Gateway interface {
 	Proxy(r *http.Request) (*http.Response, error)
 	ProxyAudio(r *http.Request) (*http.Response, error)
+	ProxySpeech(r *http.Request) (*http.Response, error)
 }
 
 type Deps struct {
@@ -22,4 +23,5 @@ func Register(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("/v1/embeddings", h.embeddings)
 	mux.HandleFunc("/v1/responses", h.responses)
 	mux.HandleFunc("/v1/audio/transcriptions", h.audioTranscriptions)
+	mux.HandleFunc("/v1/audio/speech", h.audioSpeech)
 }
