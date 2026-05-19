@@ -44,6 +44,13 @@ type Gateway struct {
 	alertStore         AlertStore
 	notifier           Notifier
 	modeToProvider     map[string]string
+
+	audioTranscriptionProvider string
+	audioTranscriptionURL      string
+	audioTranscriptionModel    string
+	audioTTSProvider           string
+	audioTTSURL                string
+	audioTTSModel              string
 }
 
 type Deps struct {
@@ -60,6 +67,13 @@ type Deps struct {
 	AlertStore         AlertStore
 	Notifier           Notifier
 	ModeToProvider     map[string]string
+
+	AudioTranscriptionProvider string
+	AudioTranscriptionURL      string
+	AudioTranscriptionModel    string
+	AudioTTSProvider           string
+	AudioTTSURL                string
+	AudioTTSModel              string
 }
 
 type openAIUsageResponse struct {
@@ -97,5 +111,12 @@ func New(d Deps) (*Gateway, error) {
 		alertStore:         d.AlertStore,
 		notifier:           d.Notifier,
 		modeToProvider:     modeMap,
+
+		audioTranscriptionProvider: d.AudioTranscriptionProvider,
+		audioTranscriptionURL:      d.AudioTranscriptionURL,
+		audioTranscriptionModel:    d.AudioTranscriptionModel,
+		audioTTSProvider:           d.AudioTTSProvider,
+		audioTTSURL:                d.AudioTTSURL,
+		audioTTSModel:              d.AudioTTSModel,
 	}, nil
 }

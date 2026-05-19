@@ -30,6 +30,10 @@ func (g *Gateway) ProxySpeech(r *http.Request) (*http.Response, error) {
 	model := extractModel(bodyBytes)
 	charCount := extractInputCharCount(bodyBytes)
 
+	if g.audioTTSProvider == "local" {
+		return g.proxySpeechToLocal(r, bodyBytes, model, charCount)
+	}
+
 	hintedProvider := requestedProviderHint(r)
 	hintedMode := requestedModeHint(r)
 
@@ -145,6 +149,64 @@ func (g *Gateway) meterSpeechResponse(r *http.Request, providerName, model strin
 			"error":      err.Error(),
 		})
 	}
+}
+
+// proxySpeechToLocal forwards a TTS request directly to the configured local
+// URL, bypassing the provider registry. The JSON body and audio response are
+// preserved verbatim. If audioTTSModel is set the model field is rewritten.
+func (g *Gateway) proxySpeechToLocal(r *http.Request, bodyBytes []byte, model string, charCount int) (*http.Response, error) {
+	if g.audioTTSModel != "" {
+		if rewritten, err := rewriteJSONModel(bodyBytes, g.audioTTSModel); err == nil {
+			bodyBytes = rewritten
+			model = g.audioTTSModel
+		}
+	}
+
+	target := g.audioTTSURL + r.URL.Path
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, target, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header = r.Header.Clone()
+	req.Header.Del("X-Costguard-Provider")
+	req.Header.Del("X-Costguard-Mode")
+
+	if g.log != nil {
+		g.log.Info("tts_routing", map[string]any{
+			"request_id": server.RequestIDFromContext(r.Context()),
+			"provider":   "local",
+			"target":     g.audioTTSURL,
+			"model":      model,
+			"chars":      charCount,
+			"path":       r.URL.Path,
+		})
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp != nil && resp.StatusCode == http.StatusOK {
+		g.meterSpeechResponse(r, "local", model, charCount, resp.StatusCode)
+	}
+
+	return resp, nil
+}
+
+// rewriteJSONModel sets the "model" field in a JSON object to newModel.
+func rewriteJSONModel(body []byte, newModel string) ([]byte, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	v, _ := json.Marshal(newModel)
+	m["model"] = v
+	return json.Marshal(m)
 }
 
 // extractInputCharCount returns the UTF-8 character count of the "input" field.

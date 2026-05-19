@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -19,6 +20,30 @@ type Config struct {
 	Routing   RoutingConfig   `json:"routing"`
 	Providers ProvidersConfig `json:"providers"`
 	Admin     AdminConfig     `json:"admin"`
+	Audio     AudioConfig
+}
+
+// AudioConfig holds routing configuration for audio endpoints.
+// Values are read from environment variables at startup.
+type AudioConfig struct {
+	// TranscriptionProvider selects the upstream for POST /v1/audio/transcriptions.
+	// Valid values: "openai" (default) or "local".
+	TranscriptionProvider string
+	// TranscriptionURL is the base URL for the local transcription server.
+	// Required when TranscriptionProvider="local".
+	TranscriptionURL string
+	// TranscriptionModel overrides the model field in requests forwarded to the
+	// local transcription server. When empty the client-supplied model is used.
+	TranscriptionModel string
+	// TTSProvider selects the upstream for POST /v1/audio/speech.
+	// Valid values: "openai" (default) or "local".
+	TTSProvider string
+	// TTSURL is the base URL for the local TTS server.
+	// Required when TTSProvider="local".
+	TTSURL string
+	// TTSModel overrides the model field in requests forwarded to the local TTS
+	// server. When empty the client-supplied model is used.
+	TTSModel string
 }
 
 type DatabaseConfig struct {
@@ -368,7 +393,58 @@ func Load(path string) (Config, error) {
 		return c, errors.New("at least one usable provider must be configured")
 	}
 
+	c.Audio = loadAudioConfig()
+	if err := ValidateAudioConfig(c.Audio); err != nil {
+		return c, err
+	}
+
 	return c, nil
+}
+
+// loadAudioConfig reads audio provider settings from environment variables.
+// Defaults to "openai" for both providers when the env vars are unset.
+func loadAudioConfig() AudioConfig {
+	transcriptionProvider := strings.TrimSpace(os.Getenv("AUDIO_TRANSCRIPTION_PROVIDER"))
+	if transcriptionProvider == "" {
+		transcriptionProvider = "openai"
+	}
+	ttsProvider := strings.TrimSpace(os.Getenv("AUDIO_TTS_PROVIDER"))
+	if ttsProvider == "" {
+		ttsProvider = "openai"
+	}
+	return AudioConfig{
+		TranscriptionProvider: transcriptionProvider,
+		TranscriptionURL:      strings.TrimSpace(os.Getenv("AUDIO_TRANSCRIPTION_URL")),
+		TranscriptionModel:    strings.TrimSpace(os.Getenv("AUDIO_TRANSCRIPTION_MODEL")),
+		TTSProvider:           ttsProvider,
+		TTSURL:                strings.TrimSpace(os.Getenv("AUDIO_TTS_URL")),
+		TTSModel:              strings.TrimSpace(os.Getenv("AUDIO_TTS_MODEL")),
+	}
+}
+
+// ValidateAudioConfig checks that provider values are valid and that local
+// providers have their required URL configured. The function is exported so
+// it can be tested in isolation without a full config.json fixture.
+func ValidateAudioConfig(cfg AudioConfig) error {
+	switch cfg.TranscriptionProvider {
+	case "openai", "local":
+	default:
+		return fmt.Errorf("AUDIO_TRANSCRIPTION_PROVIDER: unsupported value %q (valid values: openai, local)", cfg.TranscriptionProvider)
+	}
+	if cfg.TranscriptionProvider == "local" && cfg.TranscriptionURL == "" {
+		return errors.New("AUDIO_TRANSCRIPTION_URL is required when AUDIO_TRANSCRIPTION_PROVIDER=local")
+	}
+
+	switch cfg.TTSProvider {
+	case "openai", "local":
+	default:
+		return fmt.Errorf("AUDIO_TTS_PROVIDER: unsupported value %q (valid values: openai, local)", cfg.TTSProvider)
+	}
+	if cfg.TTSProvider == "local" && cfg.TTSURL == "" {
+		return errors.New("AUDIO_TTS_URL is required when AUDIO_TTS_PROVIDER=local")
+	}
+
+	return nil
 }
 
 func resolveEnv(val string) string {
