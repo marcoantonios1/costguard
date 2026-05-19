@@ -19,6 +19,24 @@ type Config struct {
 	Routing   RoutingConfig   `json:"routing"`
 	Providers ProvidersConfig `json:"providers"`
 	Admin     AdminConfig     `json:"admin"`
+	Audio     AudioConfig
+}
+
+// AudioConfig holds routing configuration for audio endpoints.
+// Values are read from environment variables at startup.
+type AudioConfig struct {
+	// TranscriptionProvider selects the upstream for POST /v1/audio/transcriptions.
+	// Valid values: "openai" (default) or "local".
+	TranscriptionProvider string
+	// TranscriptionURL is the base URL for the local transcription server.
+	// Required when TranscriptionProvider="local".
+	TranscriptionURL string
+	// TTSProvider selects the upstream for POST /v1/audio/speech.
+	// Valid values: "openai" (default) or "local".
+	TTSProvider string
+	// TTSURL is the base URL for the local TTS server.
+	// Required when TTSProvider="local".
+	TTSURL string
 }
 
 type DatabaseConfig struct {
