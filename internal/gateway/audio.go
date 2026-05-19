@@ -31,6 +31,10 @@ func (g *Gateway) ProxyAudio(r *http.Request) (*http.Response, error) {
 
 	model := extractModelFromMultipart(r.Header.Get("Content-Type"), bodyBytes)
 
+	if g.audioTranscriptionProvider == "local" {
+		return g.proxyAudioToLocal(r, bodyBytes, model)
+	}
+
 	hintedProvider := requestedProviderHint(r)
 	hintedMode := requestedModeHint(r)
 
@@ -156,6 +160,56 @@ func (g *Gateway) meterAudioResponse(r *http.Request, providerName, model string
 			"error":      err.Error(),
 		})
 	}
+}
+
+// proxyAudioToLocal forwards a transcription request directly to the configured
+// local URL, bypassing the provider registry. The multipart body and all
+// relevant headers are preserved verbatim.
+func (g *Gateway) proxyAudioToLocal(r *http.Request, bodyBytes []byte, model string) (*http.Response, error) {
+	target := g.audioTranscriptionURL + r.URL.Path
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, target, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header = r.Header.Clone()
+	req.Header.Del("X-Costguard-Provider")
+	req.Header.Del("X-Costguard-Mode")
+
+	if g.log != nil {
+		g.log.Info("audio_transcription_routing", map[string]any{
+			"request_id": server.RequestIDFromContext(r.Context()),
+			"provider":   "local",
+			"target":     g.audioTranscriptionURL,
+			"model":      model,
+			"path":       r.URL.Path,
+		})
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp != nil && resp.Body != nil && resp.StatusCode == http.StatusOK {
+		body, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		g.meterAudioResponse(r, "local", model, resp.StatusCode)
+		return &http.Response{
+			StatusCode: resp.StatusCode,
+			Header:     resp.Header.Clone(),
+			Body:       io.NopCloser(bytes.NewReader(body)),
+			Request:    r,
+		}, nil
+	}
+
+	return resp, nil
 }
 
 // extractModelFromMultipart reads the "model" field from a multipart/form-data body.

@@ -494,6 +494,11 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		BudgetChecker:      budgetSvc,
 		AlertStore:         alertStore,
 		Notifier:           notifier,
+
+		AudioTranscriptionProvider: cfg.Audio.TranscriptionProvider,
+		AudioTranscriptionURL:      cfg.Audio.TranscriptionURL,
+		AudioTTSProvider:           cfg.Audio.TTSProvider,
+		AudioTTSURL:                cfg.Audio.TTSURL,
 	})
 	if err != nil {
 		log.Error("failed_to_create_gateway", map[string]any{"error": err})
