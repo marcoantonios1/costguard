@@ -32,12 +32,18 @@ type AudioConfig struct {
 	// TranscriptionURL is the base URL for the local transcription server.
 	// Required when TranscriptionProvider="local".
 	TranscriptionURL string
+	// TranscriptionModel overrides the model field in requests forwarded to the
+	// local transcription server. When empty the client-supplied model is used.
+	TranscriptionModel string
 	// TTSProvider selects the upstream for POST /v1/audio/speech.
 	// Valid values: "openai" (default) or "local".
 	TTSProvider string
 	// TTSURL is the base URL for the local TTS server.
 	// Required when TTSProvider="local".
 	TTSURL string
+	// TTSModel overrides the model field in requests forwarded to the local TTS
+	// server. When empty the client-supplied model is used.
+	TTSModel string
 }
 
 type DatabaseConfig struct {
@@ -409,8 +415,10 @@ func loadAudioConfig() AudioConfig {
 	return AudioConfig{
 		TranscriptionProvider: transcriptionProvider,
 		TranscriptionURL:      strings.TrimSpace(os.Getenv("AUDIO_TRANSCRIPTION_URL")),
+		TranscriptionModel:    strings.TrimSpace(os.Getenv("AUDIO_TRANSCRIPTION_MODEL")),
 		TTSProvider:           ttsProvider,
 		TTSURL:                strings.TrimSpace(os.Getenv("AUDIO_TTS_URL")),
+		TTSModel:              strings.TrimSpace(os.Getenv("AUDIO_TTS_MODEL")),
 	}
 }
 

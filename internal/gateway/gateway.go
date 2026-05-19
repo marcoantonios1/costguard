@@ -47,8 +47,10 @@ type Gateway struct {
 
 	audioTranscriptionProvider string
 	audioTranscriptionURL      string
+	audioTranscriptionModel    string
 	audioTTSProvider           string
 	audioTTSURL                string
+	audioTTSModel              string
 }
 
 type Deps struct {
