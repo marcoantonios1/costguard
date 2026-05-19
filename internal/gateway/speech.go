@@ -153,8 +153,15 @@ func (g *Gateway) meterSpeechResponse(r *http.Request, providerName, model strin
 
 // proxySpeechToLocal forwards a TTS request directly to the configured local
 // URL, bypassing the provider registry. The JSON body and audio response are
-// preserved verbatim.
+// preserved verbatim. If audioTTSModel is set the model field is rewritten.
 func (g *Gateway) proxySpeechToLocal(r *http.Request, bodyBytes []byte, model string, charCount int) (*http.Response, error) {
+	if g.audioTTSModel != "" {
+		if rewritten, err := rewriteJSONModel(bodyBytes, g.audioTTSModel); err == nil {
+			bodyBytes = rewritten
+			model = g.audioTTSModel
+		}
+	}
+
 	target := g.audioTTSURL + r.URL.Path
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
@@ -189,6 +196,17 @@ func (g *Gateway) proxySpeechToLocal(r *http.Request, bodyBytes []byte, model st
 	}
 
 	return resp, nil
+}
+
+// rewriteJSONModel sets the "model" field in a JSON object to newModel.
+func rewriteJSONModel(body []byte, newModel string) ([]byte, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	v, _ := json.Marshal(newModel)
+	m["model"] = v
+	return json.Marshal(m)
 }
 
 // extractInputCharCount returns the UTF-8 character count of the "input" field.

@@ -70,8 +70,10 @@ type Deps struct {
 
 	AudioTranscriptionProvider string
 	AudioTranscriptionURL      string
+	AudioTranscriptionModel    string
 	AudioTTSProvider           string
 	AudioTTSURL                string
+	AudioTTSModel              string
 }
 
 type openAIUsageResponse struct {
@@ -112,7 +114,9 @@ func New(d Deps) (*Gateway, error) {
 
 		audioTranscriptionProvider: d.AudioTranscriptionProvider,
 		audioTranscriptionURL:      d.AudioTranscriptionURL,
+		audioTranscriptionModel:    d.AudioTranscriptionModel,
 		audioTTSProvider:           d.AudioTTSProvider,
 		audioTTSURL:                d.AudioTTSURL,
+		audioTTSModel:              d.AudioTTSModel,
 	}, nil
 }

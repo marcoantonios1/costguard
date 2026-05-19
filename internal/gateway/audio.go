@@ -164,8 +164,19 @@ func (g *Gateway) meterAudioResponse(r *http.Request, providerName, model string
 
 // proxyAudioToLocal forwards a transcription request directly to the configured
 // local URL, bypassing the provider registry. The multipart body and all
-// relevant headers are preserved verbatim.
+// relevant headers are preserved verbatim. If audioTranscriptionModel is set
+// the model field in the multipart body is rewritten before forwarding.
 func (g *Gateway) proxyAudioToLocal(r *http.Request, bodyBytes []byte, model string) (*http.Response, error) {
+	contentType := r.Header.Get("Content-Type")
+	if g.audioTranscriptionModel != "" {
+		rewritten, newCT, err := rewriteMultipartModel(contentType, bodyBytes, g.audioTranscriptionModel)
+		if err == nil {
+			bodyBytes = rewritten
+			contentType = newCT
+			model = g.audioTranscriptionModel
+		}
+	}
+
 	target := g.audioTranscriptionURL + r.URL.Path
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
@@ -176,6 +187,7 @@ func (g *Gateway) proxyAudioToLocal(r *http.Request, bodyBytes []byte, model str
 		return nil, err
 	}
 	req.Header = r.Header.Clone()
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Del("X-Costguard-Provider")
 	req.Header.Del("X-Costguard-Mode")
 
@@ -210,6 +222,48 @@ func (g *Gateway) proxyAudioToLocal(r *http.Request, bodyBytes []byte, model str
 	}
 
 	return resp, nil
+}
+
+// rewriteMultipartModel rebuilds a multipart/form-data body replacing the
+// "model" field value with newModel. Returns the original body unchanged on
+// any parse error so the request is always forwarded.
+func rewriteMultipartModel(contentType string, body []byte, newModel string) ([]byte, string, error) {
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return body, contentType, err
+	}
+	boundary, ok := params["boundary"]
+	if !ok {
+		return body, contentType, errors.New("no boundary")
+	}
+
+	mr := multipart.NewReader(bytes.NewReader(body), boundary)
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return body, contentType, err
+		}
+		partData, _ := io.ReadAll(part)
+		if part.FormName() == "model" {
+			_ = mw.WriteField("model", newModel)
+		} else {
+			w, err := mw.CreatePart(part.Header)
+			if err != nil {
+				return body, contentType, err
+			}
+			_, _ = w.Write(partData)
+		}
+		_ = part.Close()
+	}
+	_ = mw.Close()
+
+	return buf.Bytes(), mw.FormDataContentType(), nil
 }
 
 // extractModelFromMultipart reads the "model" field from a multipart/form-data body.

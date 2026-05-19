@@ -497,8 +497,10 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 
 		AudioTranscriptionProvider: cfg.Audio.TranscriptionProvider,
 		AudioTranscriptionURL:      cfg.Audio.TranscriptionURL,
+		AudioTranscriptionModel:    cfg.Audio.TranscriptionModel,
 		AudioTTSProvider:           cfg.Audio.TTSProvider,
 		AudioTTSURL:                cfg.Audio.TTSURL,
+		AudioTTSModel:              cfg.Audio.TTSModel,
 	})
 	if err != nil {
 		log.Error("failed_to_create_gateway", map[string]any{"error": err})
