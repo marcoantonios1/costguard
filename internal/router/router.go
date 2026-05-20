@@ -1,6 +1,7 @@
 package router
 
 import (
+	"math"
 	"sort"
 
 	"github.com/marcoantonios1/costguard/internal/logging"
@@ -18,12 +19,19 @@ type ProviderPriority interface {
 	Priority(providerName string) int
 }
 
+// CostOracle returns the input cost per 1M tokens for a (provider, model) pair.
+// ok=false means price is unknown; unknown-cost providers sort after known ones.
+type CostOracle interface {
+	InputPricePer1M(providerName, modelID string) (price float64, ok bool)
+}
+
 type Router struct {
 	defaultProvider    string
 	modelToProvider    map[string]string
 	availableProviders map[string]bool
 	catalog            ModelCatalog
 	priority           ProviderPriority
+	cost               CostOracle
 	log                *logging.Log
 }
 
@@ -31,8 +39,9 @@ type Config struct {
 	DefaultProvider    string
 	ModelToProvider    map[string]string
 	AvailableProviders map[string]bool
-	Catalog            ModelCatalog    // may be nil (no-op)
+	Catalog            ModelCatalog     // may be nil (no-op)
 	Priority           ProviderPriority // may be nil (legacy order)
+	Cost               CostOracle       // may be nil (skip cost ranking)
 	Log                *logging.Log
 }
 
@@ -53,6 +62,7 @@ func New(cfg Config) *Router {
 		availableProviders: available,
 		catalog:            cfg.Catalog,
 		priority:           cfg.Priority,
+		cost:               cfg.Cost,
 		log:                cfg.Log,
 	}
 }
@@ -110,9 +120,20 @@ func (r *Router) pickWithLegacyOrder(model string) string {
 }
 
 type candidate struct {
-	provider string
-	priority int
-	reason   string
+	provider   string
+	priority   int
+	reason     string
+	cost       float64
+	priceKnown bool
+}
+
+// effectiveCost returns the sort key for cost comparison. Unknown prices return
+// +Inf so they sort after all known-price candidates.
+func effectiveCost(c candidate) float64 {
+	if !c.priceKnown {
+		return math.Inf(1)
+	}
+	return c.cost
 }
 
 // pickWithPriority honours explicit model_to_provider mappings as authoritative
