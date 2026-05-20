@@ -115,10 +115,32 @@ type candidate struct {
 	reason   string
 }
 
-// pickWithPriority collects valid candidates from all three stages, ranks them
-// by priority (desc) with lexicographic name as tiebreaker, and returns the
-// winner. Emits provider_selected / provider_candidate_skipped / provider_not_found.
+// pickWithPriority honours explicit model_to_provider mappings as authoritative
+// (user intent), then ranks matcher and default candidates by priority (desc)
+// with lexicographic name as tiebreaker.
+// Emits provider_selected / provider_candidate_skipped / provider_not_found.
 func (r *Router) pickWithPriority(model string) string {
+	// Explicit mapping is the user's direct choice — honour it immediately.
+	if provider := r.pickFromExactMapping(model); provider != "" {
+		if !r.isAvailable(provider) {
+			r.logSkippedUnavailable(model, provider, "exact_mapping")
+		} else if !r.catalogAllows(provider, model) {
+			r.logSkippedCatalog(model, provider, "exact_mapping")
+		} else {
+			if r.log != nil {
+				r.log.Info("provider_selected", map[string]any{
+					"model":      model,
+					"provider":   provider,
+					"reason":     "exact_mapping",
+					"priority":   r.priority.Priority(provider),
+					"candidates": 1,
+				})
+			}
+			return provider
+		}
+	}
+
+	// No explicit mapping (or it was blocked): rank matcher + default by priority.
 	var candidates []candidate
 	seen := map[string]bool{}
 
@@ -142,7 +164,6 @@ func (r *Router) pickWithPriority(model string) string {
 		})
 	}
 
-	tryAdd(r.pickFromExactMapping(model), "exact_mapping")
 	tryAdd(r.pickFromMatchers(model), "model_matcher")
 	tryAdd(r.defaultProvider, "default")
 

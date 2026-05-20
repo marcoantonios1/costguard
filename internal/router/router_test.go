@@ -128,10 +128,10 @@ func TestPickProvider_UnconstrainedCatalog_AllowsAll(t *testing.T) {
 
 // --- priority path tests ---
 
-func TestPickProvider_Priority_HigherWins(t *testing.T) {
-	// exact_mapping resolves gpt-4o → openai_primary (priority 95)
-	// default is anthropic_primary (priority 100)
-	// anthropic_primary should win because priority 100 > 95
+func TestPickProvider_Priority_ExplicitMappingIsAuthoritative(t *testing.T) {
+	// explicit mapping → openai_primary (priority 95)
+	// default          → anthropic_primary (priority 100, higher)
+	// explicit mapping must win regardless of priority
 	r := newRouter(router.Config{
 		DefaultProvider: "anthropic_primary",
 		ModelToProvider: map[string]string{"gpt-4o": "openai_primary"},
@@ -145,30 +145,48 @@ func TestPickProvider_Priority_HigherWins(t *testing.T) {
 		}},
 	})
 	got := r.PickProvider("gpt-4o")
-	if got != "anthropic_primary" {
-		t.Errorf("expected anthropic_primary (higher priority), got %q", got)
+	if got != "openai_primary" {
+		t.Errorf("explicit mapping must win over higher-priority default, got %q", got)
+	}
+}
+
+func TestPickProvider_Priority_HigherWins_NoExplicitMapping(t *testing.T) {
+	// no explicit mapping: matcher → google_primary (90), default → openai_primary (95)
+	// higher priority default should win
+	r := newRouter(router.Config{
+		DefaultProvider: "openai_primary",
+		AvailableProviders: map[string]bool{
+			"openai_primary": true,
+			"google_primary": true,
+		},
+		Priority: &stubPriority{priorities: map[string]int{
+			"openai_primary": 95,
+			"google_primary": 90,
+		}},
+	})
+	got := r.PickProvider("gemini-2.5-flash")
+	if got != "openai_primary" {
+		t.Errorf("expected openai_primary (higher priority default), got %q", got)
 	}
 }
 
 func TestPickProvider_Priority_LexicographicTiebreaker(t *testing.T) {
-	// exact_mapping → "beta_provider" (priority 80)
-	// default        → "alpha_provider" (priority 80)
-	// equal priority: "alpha_provider" < "beta_provider" lexicographically → alpha wins
+	// no explicit mapping: matcher → openai_primary (80), default → anthropic_primary (80)
+	// equal priority: "anthropic_primary" < "openai_primary" lexicographically → anthropic wins
 	r := newRouter(router.Config{
-		DefaultProvider: "alpha_provider",
-		ModelToProvider: map[string]string{"some-model": "beta_provider"},
+		DefaultProvider: "anthropic_primary",
 		AvailableProviders: map[string]bool{
-			"alpha_provider": true,
-			"beta_provider":  true,
+			"anthropic_primary": true,
+			"openai_primary":    true,
 		},
 		Priority: &stubPriority{priorities: map[string]int{
-			"alpha_provider": 80,
-			"beta_provider":  80,
+			"anthropic_primary": 80,
+			"openai_primary":    80,
 		}},
 	})
-	got := r.PickProvider("some-model")
-	if got != "alpha_provider" {
-		t.Errorf("expected alpha_provider (lexicographic tiebreaker), got %q", got)
+	got := r.PickProvider("gpt-4o")
+	if got != "anthropic_primary" {
+		t.Errorf("expected anthropic_primary (lexicographic tiebreaker), got %q", got)
 	}
 }
 
