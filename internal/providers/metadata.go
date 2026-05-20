@@ -15,6 +15,7 @@ type RuntimeMetadata struct {
 	SupportsEmbeddings bool      `json:"supports_embeddings"`
 	Priority           int       `json:"priority"`
 	Tags               []string  `json:"tags"`
+	SupportedModels    []string  `json:"supported_models,omitempty"`
 	Enabled            bool      `json:"enabled"`
 	SkipReason         string    `json:"skip_reason,omitempty"`
 	CheckedAt          time.Time `json:"checked_at"`

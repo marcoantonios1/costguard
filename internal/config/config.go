@@ -164,6 +164,7 @@ type ProviderMetadata struct {
 	SupportsEmbeddings bool     `json:"supports_embeddings"`
 	Priority           int      `json:"priority"`
 	Tags               []string `json:"tags"`
+	SupportedModels    []string `json:"supported_models,omitempty"`
 }
 
 type rawProviderMetadata struct {
@@ -174,6 +175,7 @@ type rawProviderMetadata struct {
 	SupportsEmbeddings bool     `json:"supports_embeddings"`
 	Priority           int      `json:"priority"`
 	Tags               []string `json:"tags"`
+	SupportedModels    []string `json:"supported_models,omitempty"`
 }
 
 func Load(path string) (Config, error) {
@@ -539,6 +541,7 @@ func normalizeProviderMetadata(in rawProviderMetadata) ProviderMetadata {
 		SupportsEmbeddings: in.SupportsEmbeddings,
 		Priority:           in.Priority,
 		Tags:               append([]string(nil), in.Tags...),
+		SupportedModels:    append([]string(nil), in.SupportedModels...),
 	}
 
 	return out
