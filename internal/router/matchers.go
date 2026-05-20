@@ -10,6 +10,8 @@ func MatchProviderByModel(model string) string {
 		return "openai_primary"
 	case strings.HasPrefix(model, "claude-"):
 		return "anthropic_primary"
+	case strings.HasPrefix(model, "gemini-"):
+		return "google_primary"
 	default:
 		return ""
 	}

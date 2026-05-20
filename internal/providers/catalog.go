@@ -36,3 +36,47 @@ func (c *Catalog) List() []RuntimeMetadata {
 	}
 	return out
 }
+
+// SupportsModel returns the names of all enabled providers that explicitly list
+// modelID in their SupportedModels slice. Unconstrained providers (empty
+// SupportedModels) are not included.
+func (c *Catalog) SupportsModel(modelID string) []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var out []string
+	for name, md := range c.items {
+		if !md.Enabled || len(md.SupportedModels) == 0 {
+			continue
+		}
+		for _, m := range md.SupportedModels {
+			if m == modelID {
+				out = append(out, name)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// ModelSupported reports whether the named provider supports modelID.
+// Returns true when the provider is unconstrained (empty SupportedModels) or
+// when modelID appears in the list. Returns false if the provider is unknown.
+func (c *Catalog) ModelSupported(providerName, modelID string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	md, ok := c.items[providerName]
+	if !ok {
+		return false
+	}
+	if len(md.SupportedModels) == 0 {
+		return true
+	}
+	for _, m := range md.SupportedModels {
+		if m == modelID {
+			return true
+		}
+	}
+	return false
+}
