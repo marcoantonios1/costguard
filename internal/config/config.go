@@ -541,6 +541,7 @@ func normalizeProviderMetadata(in rawProviderMetadata) ProviderMetadata {
 		SupportsEmbeddings: in.SupportsEmbeddings,
 		Priority:           in.Priority,
 		Tags:               append([]string(nil), in.Tags...),
+		SupportedModels:    append([]string(nil), in.SupportedModels...),
 	}
 
 	return out
