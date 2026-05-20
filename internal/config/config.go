@@ -21,7 +21,18 @@ type Config struct {
 	Providers ProvidersConfig `json:"providers"`
 	Admin     AdminConfig     `json:"admin"`
 	Audio     AudioConfig
+	Pricing   PricingConfig `json:"pricing"`
 }
+
+// PriceEntry holds the token pricing for a single model.
+type PriceEntry struct {
+	InputPer1M       float64 `json:"input_per_1m"`
+	CachedInputPer1M float64 `json:"cached_input_per_1m"`
+	OutputPer1M      float64 `json:"output_per_1m"`
+}
+
+// PricingConfig maps provider → model → price, mirroring the JSON structure.
+type PricingConfig map[string]map[string]PriceEntry
 
 // AudioConfig holds routing configuration for audio endpoints.
 // Values are read from environment variables at startup.
@@ -227,6 +238,7 @@ func Load(path string) (Config, error) {
 		Reports   rawReports     `json:"reports"`
 		Admin     AdminConfig    `json:"admin"`
 		Routing   RoutingConfig  `json:"routing"`
+		Pricing   PricingConfig  `json:"pricing"`
 		Providers struct {
 			OpenAI           map[string]rawOpenAIProvider           `json:"openai"`
 			Anthropic        map[string]rawAnthropicProvider        `json:"anthropic"`
@@ -243,6 +255,7 @@ func Load(path string) (Config, error) {
 	c.Server = rc.Server
 	c.Logging = rc.Logging
 	c.Routing = rc.Routing
+	c.Pricing = rc.Pricing
 
 	c.Cache.Enabled = rc.Cache.Enabled
 	c.Cache.MaxKeys = rc.Cache.MaxKeys
