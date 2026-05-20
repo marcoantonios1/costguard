@@ -147,6 +147,13 @@
         "api_key": "env:ANTHROPIC_API_KEY",
         "anthropic_version": "2023-06-01",
         "timeout": "60s",
+        "retry": {
+          "max_attempts": 2,
+          "retry_on_5xx": true,
+          "retry_on_timeout": false,
+          "initial_backoff": "500ms",
+          "max_backoff": "10s"
+        },
         "metadata": {
           "kind": "cloud",
           "supports_tools": true,
