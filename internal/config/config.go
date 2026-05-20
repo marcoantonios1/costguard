@@ -124,6 +124,16 @@ type AdminConfig struct {
 	APIKey string `json:"api_key"`
 }
 
+// RetryPolicy configures per-attempt retry behaviour for a provider.
+// MaxAttempts=1 (the default) means a single attempt with no retry loop.
+type RetryPolicy struct {
+	MaxAttempts    int           `json:"max_attempts"`
+	RetryOn5xx     bool          `json:"retry_on_5xx"`
+	RetryOnTimeout bool          `json:"retry_on_timeout"`
+	InitialBackoff time.Duration `json:"initial_backoff"`
+	MaxBackoff     time.Duration `json:"max_backoff"`
+}
+
 type OpenAIProvider struct {
 	BaseURL  string           `json:"base_url"`
 	APIKey   string           `json:"api_key"`
@@ -131,6 +141,7 @@ type OpenAIProvider struct {
 	Project  string           `json:"project,omitempty"`
 	Timeout  time.Duration    `json:"timeout"`
 	Metadata ProviderMetadata `json:"metadata"`
+	Retry    RetryPolicy      `json:"retry"`
 }
 
 type AnthropicProvider struct {
@@ -139,6 +150,7 @@ type AnthropicProvider struct {
 	AnthropicVersion string           `json:"anthropic_version,omitempty"`
 	Timeout          time.Duration    `json:"timeout"`
 	Metadata         ProviderMetadata `json:"metadata"`
+	Retry            RetryPolicy      `json:"retry"`
 }
 
 type GeminiProvider struct {
@@ -146,14 +158,16 @@ type GeminiProvider struct {
 	APIKey   string           `json:"api_key"`
 	Timeout  time.Duration    `json:"timeout"`
 	Metadata ProviderMetadata `json:"metadata"`
+	Retry    RetryPolicy      `json:"retry"`
 }
 
 type OpenAICompatibleProvider struct {
-	BaseURL        string           `json:"base_url"`
-	APIKey         string           `json:"api_key"`
-	Timeout        time.Duration    `json:"timeout"`
-	AllowMultimodal bool            `json:"allow_multimodal"`
-	Metadata       ProviderMetadata `json:"metadata"`
+	BaseURL         string           `json:"base_url"`
+	APIKey          string           `json:"api_key"`
+	Timeout         time.Duration    `json:"timeout"`
+	AllowMultimodal bool             `json:"allow_multimodal"`
+	Metadata        ProviderMetadata `json:"metadata"`
+	Retry           RetryPolicy      `json:"retry"`
 }
 
 type ProviderMetadata struct {
@@ -192,6 +206,37 @@ func Load(path string) (Config, error) {
 		MaxKeys int    `json:"max_keys"`
 	}
 
+	type rawRetryPolicy struct {
+		MaxAttempts    int    `json:"max_attempts"`
+		RetryOn5xx     bool   `json:"retry_on_5xx"`
+		RetryOnTimeout bool   `json:"retry_on_timeout"`
+		InitialBackoff string `json:"initial_backoff"`
+		MaxBackoff     string `json:"max_backoff"`
+	}
+
+	parseRetryPolicy := func(r rawRetryPolicy) (RetryPolicy, error) {
+		p := RetryPolicy{
+			MaxAttempts:    r.MaxAttempts,
+			RetryOn5xx:     r.RetryOn5xx,
+			RetryOnTimeout: r.RetryOnTimeout,
+		}
+		if r.InitialBackoff != "" {
+			d, err := time.ParseDuration(r.InitialBackoff)
+			if err != nil {
+				return p, fmt.Errorf("retry.initial_backoff: %w", err)
+			}
+			p.InitialBackoff = d
+		}
+		if r.MaxBackoff != "" {
+			d, err := time.ParseDuration(r.MaxBackoff)
+			if err != nil {
+				return p, fmt.Errorf("retry.max_backoff: %w", err)
+			}
+			p.MaxBackoff = d
+		}
+		return p, nil
+	}
+
 	type rawOpenAIProvider struct {
 		BaseURL  string              `json:"base_url"`
 		APIKey   string              `json:"api_key"`
@@ -199,6 +244,7 @@ func Load(path string) (Config, error) {
 		Project  string              `json:"project,omitempty"`
 		Timeout  string              `json:"timeout"`
 		Metadata rawProviderMetadata `json:"metadata"`
+		Retry    rawRetryPolicy      `json:"retry"`
 	}
 
 	type rawAnthropicProvider struct {
@@ -207,6 +253,7 @@ func Load(path string) (Config, error) {
 		AnthropicVersion string              `json:"anthropic_version,omitempty"`
 		Timeout          string              `json:"timeout"`
 		Metadata         rawProviderMetadata `json:"metadata"`
+		Retry            rawRetryPolicy      `json:"retry"`
 	}
 
 	type rawGeminiProvider struct {
@@ -214,14 +261,16 @@ func Load(path string) (Config, error) {
 		APIKey   string              `json:"api_key"`
 		Timeout  string              `json:"timeout"`
 		Metadata rawProviderMetadata `json:"metadata"`
+		Retry    rawRetryPolicy      `json:"retry"`
 	}
 
 	type rawOpenAICompatibleProvider struct {
 		BaseURL         string              `json:"base_url"`
 		APIKey          string              `json:"api_key"`
 		Timeout         string              `json:"timeout"`
-		AllowMultimodal bool               `json:"allow_multimodal"`
+		AllowMultimodal bool                `json:"allow_multimodal"`
 		Metadata        rawProviderMetadata `json:"metadata"`
+		Retry           rawRetryPolicy      `json:"retry"`
 	}
 
 	type rawReports struct {
@@ -328,7 +377,10 @@ func Load(path string) (Config, error) {
 			}
 			to = d
 		}
-
+		retry, err := parseRetryPolicy(p.Retry)
+		if err != nil {
+			return c, fmt.Errorf("providers.openai.%s: %w", name, err)
+		}
 		c.Providers.OpenAI[name] = OpenAIProvider{
 			BaseURL:  p.BaseURL,
 			APIKey:   resolveEnvIfPresent(p.APIKey),
@@ -336,6 +388,7 @@ func Load(path string) (Config, error) {
 			Project:  p.Project,
 			Timeout:  to,
 			Metadata: normalizeProviderMetadata(p.Metadata),
+			Retry:    retry,
 		}
 	}
 
@@ -349,13 +402,17 @@ func Load(path string) (Config, error) {
 			}
 			to = d
 		}
-
+		retry, err := parseRetryPolicy(p.Retry)
+		if err != nil {
+			return c, fmt.Errorf("providers.anthropic.%s: %w", name, err)
+		}
 		c.Providers.Anthropic[name] = AnthropicProvider{
 			BaseURL:          p.BaseURL,
 			APIKey:           resolveEnvIfPresent(p.APIKey),
 			AnthropicVersion: p.AnthropicVersion,
 			Timeout:          to,
 			Metadata:         normalizeProviderMetadata(p.Metadata),
+			Retry:            retry,
 		}
 	}
 
@@ -369,12 +426,16 @@ func Load(path string) (Config, error) {
 			}
 			to = d
 		}
-
+		retry, err := parseRetryPolicy(p.Retry)
+		if err != nil {
+			return c, fmt.Errorf("providers.gemini.%s: %w", name, err)
+		}
 		c.Providers.Gemini[name] = GeminiProvider{
 			BaseURL:  p.BaseURL,
 			APIKey:   resolveEnvIfPresent(p.APIKey),
 			Timeout:  to,
 			Metadata: normalizeProviderMetadata(p.Metadata),
+			Retry:    retry,
 		}
 	}
 
@@ -388,13 +449,17 @@ func Load(path string) (Config, error) {
 			}
 			to = d
 		}
-
+		retry, err := parseRetryPolicy(p.Retry)
+		if err != nil {
+			return c, fmt.Errorf("providers.openai_compatible.%s: %w", name, err)
+		}
 		c.Providers.OpenAICompatible[name] = OpenAICompatibleProvider{
 			BaseURL:         p.BaseURL,
 			APIKey:          resolveEnvIfPresent(p.APIKey), // optional
 			Timeout:         to,
 			AllowMultimodal: p.AllowMultimodal,
 			Metadata:        normalizeProviderMetadata(p.Metadata),
+			Retry:           retry,
 		}
 	}
 

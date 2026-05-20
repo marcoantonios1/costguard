@@ -44,6 +44,7 @@ type Gateway struct {
 	alertStore         AlertStore
 	notifier           Notifier
 	modeToProvider     map[string]string
+	retryPolicies      map[string]RetryPolicy
 
 	audioTranscriptionProvider string
 	audioTranscriptionURL      string
@@ -58,15 +59,16 @@ type Deps struct {
 	Registry *providers.Registry
 	Log      *logging.Log
 
-	FallbackProvider   string
-	ModelCompatibility map[string]map[string]string
-	Cache              cache.Cache
-	CacheTTL           time.Duration
-	UsageStore         usage.Store
-	BudgetChecker      BudgetChecker
-	AlertStore         AlertStore
-	Notifier           Notifier
-	ModeToProvider     map[string]string
+	FallbackProvider      string
+	ModelCompatibility    map[string]map[string]string
+	Cache                 cache.Cache
+	CacheTTL              time.Duration
+	UsageStore            usage.Store
+	BudgetChecker         BudgetChecker
+	AlertStore            AlertStore
+	Notifier              Notifier
+	ModeToProvider        map[string]string
+	ProviderRetryPolicies map[string]RetryPolicy
 
 	AudioTranscriptionProvider string
 	AudioTranscriptionURL      string
