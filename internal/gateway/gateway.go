@@ -100,6 +100,11 @@ func New(d Deps) (*Gateway, error) {
 		modeMap[strings.ToLower(strings.TrimSpace(k))] = strings.TrimSpace(v)
 	}
 
+	retryPolicies := map[string]RetryPolicy{}
+	for name, p := range d.ProviderRetryPolicies {
+		retryPolicies[name] = p
+	}
+
 	return &Gateway{
 		router:             d.Router,
 		reg:                d.Registry,
@@ -113,6 +118,7 @@ func New(d Deps) (*Gateway, error) {
 		alertStore:         d.AlertStore,
 		notifier:           d.Notifier,
 		modeToProvider:     modeMap,
+		retryPolicies:      retryPolicies,
 
 		audioTranscriptionProvider: d.AudioTranscriptionProvider,
 		audioTranscriptionURL:      d.AudioTranscriptionURL,
