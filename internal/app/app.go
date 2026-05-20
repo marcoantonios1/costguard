@@ -453,6 +453,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		AvailableProviders: availableProviders,
 		Catalog:            catalog,
 		Priority:           catalog,
+		Cost:               router.MeteringCostOracle{},
 		Log:                log,
 	})
 
