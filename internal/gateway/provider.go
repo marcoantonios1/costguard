@@ -68,8 +68,15 @@ func (g *Gateway) maybeStoreAndReturn(
 	return responseFromCacheEntry(r, entry), nil
 }
 
+func (g *Gateway) providerRetryPolicy(providerName string) RetryPolicy {
+	if p, ok := g.retryPolicies[providerName]; ok {
+		return p
+	}
+	return DefaultRetryPolicy()
+}
+
 func (g *Gateway) callProviderWithFallback(r *http.Request, providerName string, bodyBytes []byte, originalModel string) (*http.Response, string, string, error) {
-	resp, err := g.callSingleProvider(r, providerName, bodyBytes)
+	resp, err := g.callSingleProvider(r, providerName, bodyBytes, g.providerRetryPolicy(providerName))
 	if err == nil {
 		return resp, providerName, originalModel, nil
 	}
@@ -101,7 +108,7 @@ func (g *Gateway) callProviderWithFallback(r *http.Request, providerName string,
 		})
 	}
 
-	fallbackResp, fallbackErr := g.callSingleProvider(r, g.fallback, rewrittenBody)
+	fallbackResp, fallbackErr := g.callSingleProvider(r, g.fallback, rewrittenBody, g.providerRetryPolicy(g.fallback))
 	if fallbackErr != nil {
 		if g.log != nil {
 			g.log.Error("fallback_failed", map[string]any{
@@ -129,43 +136,46 @@ func (g *Gateway) callProviderWithFallback(r *http.Request, providerName string,
 	return fallbackResp, g.fallback, fallbackModel, nil
 }
 
-func (g *Gateway) callSingleProvider(r *http.Request, providerName string, bodyBytes []byte) (*http.Response, error) {
-	p, err := g.reg.Get(providerName)
-	if err != nil {
-		return nil, err
-	}
-
-	reqCopy := cloneRequestWithBody(r, bodyBytes)
-
-	resp, err := p.Do(reqCopy.Context(), reqCopy)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp != nil && resp.StatusCode >= 400 && resp.Body != nil {
-		body, readErr := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if readErr != nil {
-			return nil, readErr
+func (g *Gateway) callSingleProvider(r *http.Request, providerName string, bodyBytes []byte, policy RetryPolicy) (*http.Response, error) {
+	requestID := server.RequestIDFromContext(r.Context())
+	return callWithRetry(r.Context(), policy, g.log, providerName, requestID, func() (*http.Response, error) {
+		p, err := g.reg.Get(providerName)
+		if err != nil {
+			return nil, err
 		}
 
-		normalizedBody, normErr := p.NormalizeError(resp.StatusCode, body)
-		if normErr != nil {
-			return nil, normErr
+		reqCopy := cloneRequestWithBody(r, bodyBytes)
+
+		resp, err := p.Do(reqCopy.Context(), reqCopy)
+		if err != nil {
+			return nil, err
 		}
 
-		resp.Body = io.NopCloser(bytes.NewReader(normalizedBody))
-		resp.ContentLength = int64(len(normalizedBody))
-		resp.Header.Set("Content-Type", "application/json")
+		if resp != nil && resp.StatusCode >= 400 && resp.Body != nil {
+			body, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if readErr != nil {
+				return nil, readErr
+			}
 
-		if resp.StatusCode >= 500 {
-			return nil, fmt.Errorf("upstream_5xx status=%d provider=%s", resp.StatusCode, providerName)
+			normalizedBody, normErr := p.NormalizeError(resp.StatusCode, body)
+			if normErr != nil {
+				return nil, normErr
+			}
+
+			resp.Body = io.NopCloser(bytes.NewReader(normalizedBody))
+			resp.ContentLength = int64(len(normalizedBody))
+			resp.Header.Set("Content-Type", "application/json")
+
+			if resp.StatusCode >= 500 {
+				return nil, fmt.Errorf("upstream_5xx status=%d provider=%s", resp.StatusCode, providerName)
+			}
+
+			return resp, nil
 		}
 
 		return resp, nil
-	}
-
-	return resp, nil
+	})
 }
 
 func isRetryableProviderError(err error) bool {

@@ -447,6 +447,56 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		})
 	}
 
+	retryPolicies := map[string]gateway.RetryPolicy{}
+	applyRetryDefaults := func(p gateway.RetryPolicy) gateway.RetryPolicy {
+		if p.MaxAttempts <= 0 {
+			p.MaxAttempts = 1
+		}
+		if p.InitialBackoff <= 0 {
+			p.InitialBackoff = 500 * time.Millisecond
+		}
+		if p.MaxBackoff <= 0 {
+			p.MaxBackoff = 10 * time.Second
+		}
+		return p
+	}
+	for name, p := range cfg.Providers.OpenAI {
+		retryPolicies[name] = applyRetryDefaults(gateway.RetryPolicy{
+			MaxAttempts:    p.Retry.MaxAttempts,
+			RetryOn5xx:     p.Retry.RetryOn5xx,
+			RetryOnTimeout: p.Retry.RetryOnTimeout,
+			InitialBackoff: p.Retry.InitialBackoff,
+			MaxBackoff:     p.Retry.MaxBackoff,
+		})
+	}
+	for name, p := range cfg.Providers.Anthropic {
+		retryPolicies[name] = applyRetryDefaults(gateway.RetryPolicy{
+			MaxAttempts:    p.Retry.MaxAttempts,
+			RetryOn5xx:     p.Retry.RetryOn5xx,
+			RetryOnTimeout: p.Retry.RetryOnTimeout,
+			InitialBackoff: p.Retry.InitialBackoff,
+			MaxBackoff:     p.Retry.MaxBackoff,
+		})
+	}
+	for name, p := range cfg.Providers.Gemini {
+		retryPolicies[name] = applyRetryDefaults(gateway.RetryPolicy{
+			MaxAttempts:    p.Retry.MaxAttempts,
+			RetryOn5xx:     p.Retry.RetryOn5xx,
+			RetryOnTimeout: p.Retry.RetryOnTimeout,
+			InitialBackoff: p.Retry.InitialBackoff,
+			MaxBackoff:     p.Retry.MaxBackoff,
+		})
+	}
+	for name, p := range cfg.Providers.OpenAICompatible {
+		retryPolicies[name] = applyRetryDefaults(gateway.RetryPolicy{
+			MaxAttempts:    p.Retry.MaxAttempts,
+			RetryOn5xx:     p.Retry.RetryOn5xx,
+			RetryOnTimeout: p.Retry.RetryOnTimeout,
+			InitialBackoff: p.Retry.InitialBackoff,
+			MaxBackoff:     p.Retry.MaxBackoff,
+		})
+	}
+
 	rt := router.New(router.Config{
 		DefaultProvider:    cfg.Routing.DefaultProvider,
 		ModelToProvider:    cfg.Routing.ModelToProvider,
@@ -512,18 +562,19 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 	})
 
 	gw, err := gateway.New(gateway.Deps{
-		Router:             rt,
-		Registry:           reg,
-		Log:                log,
-		FallbackProvider:   cfg.Routing.FallbackProvider,
-		ModelCompatibility: cfg.Routing.ModelCompatibility,
-		ModeToProvider:     cfg.Routing.ModeToProvider,
-		Cache:              c,
-		CacheTTL:           cfg.Cache.TTL,
-		UsageStore:         usageStore,
-		BudgetChecker:      budgetSvc,
-		AlertStore:         alertStore,
-		Notifier:           notifier,
+		Router:                rt,
+		Registry:              reg,
+		Log:                   log,
+		FallbackProvider:      cfg.Routing.FallbackProvider,
+		ModelCompatibility:    cfg.Routing.ModelCompatibility,
+		ModeToProvider:        cfg.Routing.ModeToProvider,
+		Cache:                 c,
+		CacheTTL:              cfg.Cache.TTL,
+		UsageStore:            usageStore,
+		BudgetChecker:         budgetSvc,
+		AlertStore:            alertStore,
+		Notifier:              notifier,
+		ProviderRetryPolicies: retryPolicies,
 
 		AudioTranscriptionProvider: cfg.Audio.TranscriptionProvider,
 		AudioTranscriptionURL:      cfg.Audio.TranscriptionURL,

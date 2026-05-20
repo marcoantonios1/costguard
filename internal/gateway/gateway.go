@@ -44,6 +44,7 @@ type Gateway struct {
 	alertStore         AlertStore
 	notifier           Notifier
 	modeToProvider     map[string]string
+	retryPolicies      map[string]RetryPolicy
 
 	audioTranscriptionProvider string
 	audioTranscriptionURL      string
@@ -58,15 +59,16 @@ type Deps struct {
 	Registry *providers.Registry
 	Log      *logging.Log
 
-	FallbackProvider   string
-	ModelCompatibility map[string]map[string]string
-	Cache              cache.Cache
-	CacheTTL           time.Duration
-	UsageStore         usage.Store
-	BudgetChecker      BudgetChecker
-	AlertStore         AlertStore
-	Notifier           Notifier
-	ModeToProvider     map[string]string
+	FallbackProvider      string
+	ModelCompatibility    map[string]map[string]string
+	Cache                 cache.Cache
+	CacheTTL              time.Duration
+	UsageStore            usage.Store
+	BudgetChecker         BudgetChecker
+	AlertStore            AlertStore
+	Notifier              Notifier
+	ModeToProvider        map[string]string
+	ProviderRetryPolicies map[string]RetryPolicy
 
 	AudioTranscriptionProvider string
 	AudioTranscriptionURL      string
@@ -98,6 +100,11 @@ func New(d Deps) (*Gateway, error) {
 		modeMap[strings.ToLower(strings.TrimSpace(k))] = strings.TrimSpace(v)
 	}
 
+	retryPolicies := map[string]RetryPolicy{}
+	for name, p := range d.ProviderRetryPolicies {
+		retryPolicies[name] = p
+	}
+
 	return &Gateway{
 		router:             d.Router,
 		reg:                d.Registry,
@@ -111,6 +118,7 @@ func New(d Deps) (*Gateway, error) {
 		alertStore:         d.AlertStore,
 		notifier:           d.Notifier,
 		modeToProvider:     modeMap,
+		retryPolicies:      retryPolicies,
 
 		audioTranscriptionProvider: d.AudioTranscriptionProvider,
 		audioTranscriptionURL:      d.AudioTranscriptionURL,
