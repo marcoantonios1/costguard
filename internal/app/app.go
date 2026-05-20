@@ -17,6 +17,7 @@ import (
 	"github.com/marcoantonios1/costguard/internal/database"
 	"github.com/marcoantonios1/costguard/internal/gateway"
 	"github.com/marcoantonios1/costguard/internal/logging"
+	"github.com/marcoantonios1/costguard/internal/metering"
 	"github.com/marcoantonios1/costguard/internal/notify"
 	"github.com/marcoantonios1/costguard/internal/providers"
 	anthropic_provider "github.com/marcoantonios1/costguard/internal/providers/anthropic"
@@ -441,6 +442,21 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		AvailableProviders: availableProviders,
 		Log:                log,
 	})
+
+	if len(cfg.Pricing) > 0 {
+		prices := make(map[string]map[string]metering.Price, len(cfg.Pricing))
+		for provider, models := range cfg.Pricing {
+			prices[provider] = make(map[string]metering.Price, len(models))
+			for model, e := range models {
+				prices[provider][model] = metering.Price{
+					InputPer1M:       e.InputPer1M,
+					CachedInputPer1M: e.CachedInputPer1M,
+					OutputPer1M:      e.OutputPer1M,
+				}
+			}
+		}
+		metering.SetConfigPrices(prices)
+	}
 
 	var c cache.Cache
 	if cfg.Cache.Enabled {
