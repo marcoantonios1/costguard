@@ -134,6 +134,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 			SupportsEmbeddings: p.Metadata.SupportsEmbeddings,
 			Priority:           p.Metadata.Priority,
 			Tags:               append([]string(nil), p.Metadata.Tags...),
+			SupportedModels:    append([]string(nil), p.Metadata.SupportedModels...),
 			Enabled:            true,
 			CheckedAt:          time.Now(),
 		})
@@ -240,6 +241,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 			SupportsEmbeddings: p.Metadata.SupportsEmbeddings,
 			Priority:           p.Metadata.Priority,
 			Tags:               append([]string(nil), p.Metadata.Tags...),
+			SupportedModels:    append([]string(nil), p.Metadata.SupportedModels...),
 			Enabled:            true,
 			CheckedAt:          time.Now(),
 		})
@@ -345,6 +347,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 			SupportsEmbeddings: p.Metadata.SupportsEmbeddings,
 			Priority:           p.Metadata.Priority,
 			Tags:               append([]string(nil), p.Metadata.Tags...),
+			SupportedModels:    append([]string(nil), p.Metadata.SupportedModels...),
 			Enabled:            true,
 			CheckedAt:          time.Now(),
 		})
@@ -424,6 +427,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 			SupportsEmbeddings: p.Metadata.SupportsEmbeddings,
 			Priority:           p.Metadata.Priority,
 			Tags:               append([]string(nil), p.Metadata.Tags...),
+			SupportedModels:    append([]string(nil), p.Metadata.SupportedModels...),
 			Enabled:            true,
 			CheckedAt:          time.Now(),
 		})
