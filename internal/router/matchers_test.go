@@ -1,6 +1,10 @@
 package router_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/marcoantonios1/costguard/internal/router"
+)
 
 func TestMatchProviderByModel(t *testing.T) {
 	cases := []struct {
@@ -22,7 +26,7 @@ func TestMatchProviderByModel(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		got := MatchProviderByModel(tc.model)
+		got := router.MatchProviderByModel(tc.model)
 		if got != tc.want {
 			t.Errorf("MatchProviderByModel(%q) = %q, want %q", tc.model, got, tc.want)
 		}
