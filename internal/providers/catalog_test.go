@@ -108,6 +108,31 @@ func TestSupportsModel_MultipleProviders(t *testing.T) {
 	}
 }
 
+func TestCatalogPriority_Known(t *testing.T) {
+	c := newCatalog(providers.RuntimeMetadata{
+		Name:     "anthropic_primary",
+		Enabled:  true,
+		Priority: 100,
+	})
+	if got := c.Priority("anthropic_primary"); got != 100 {
+		t.Errorf("Priority(anthropic_primary) = %d, want 100", got)
+	}
+}
+
+func TestCatalogPriority_Unknown(t *testing.T) {
+	c := newCatalog()
+	if got := c.Priority("nonexistent"); got != 0 {
+		t.Errorf("Priority(nonexistent) = %d, want 0", got)
+	}
+}
+
+func TestCatalogPriority_Zero(t *testing.T) {
+	c := newCatalog(providers.RuntimeMetadata{Name: "local_ollama", Enabled: true})
+	if got := c.Priority("local_ollama"); got != 0 {
+		t.Errorf("Priority(local_ollama) = %d, want 0", got)
+	}
+}
+
 func TestSupportsModel_NotListed(t *testing.T) {
 	c := newCatalog(providers.RuntimeMetadata{
 		Name:            "anthropic_primary",

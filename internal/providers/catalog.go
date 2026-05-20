@@ -59,6 +59,17 @@ func (c *Catalog) SupportsModel(modelID string) []string {
 	return out
 }
 
+// Priority returns the configured priority for providerName, or 0 if unknown.
+func (c *Catalog) Priority(providerName string) int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	md, ok := c.items[providerName]
+	if !ok {
+		return 0
+	}
+	return md.Priority
+}
+
 // ModelSupported reports whether the named provider supports modelID.
 // Returns true when the provider is unconstrained (empty SupportedModels) or
 // when modelID appears in the list. Returns false if the provider is unknown.

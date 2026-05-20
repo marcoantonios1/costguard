@@ -1,6 +1,10 @@
 package router
 
-import "github.com/marcoantonios1/costguard/internal/logging"
+import (
+	"sort"
+
+	"github.com/marcoantonios1/costguard/internal/logging"
+)
 
 // ModelCatalog is the subset of *providers.Catalog the router needs.
 // Nil is a valid value — all catalog checks become no-ops.
@@ -8,11 +12,18 @@ type ModelCatalog interface {
 	ModelSupported(providerName, modelID string) bool
 }
 
+// ProviderPriority resolves the numeric priority for a provider name.
+// Nil is a valid value — priority-based selection is disabled.
+type ProviderPriority interface {
+	Priority(providerName string) int
+}
+
 type Router struct {
 	defaultProvider    string
 	modelToProvider    map[string]string
 	availableProviders map[string]bool
 	catalog            ModelCatalog
+	priority           ProviderPriority
 	log                *logging.Log
 }
 
@@ -20,7 +31,8 @@ type Config struct {
 	DefaultProvider    string
 	ModelToProvider    map[string]string
 	AvailableProviders map[string]bool
-	Catalog            ModelCatalog // may be nil (no-op)
+	Catalog            ModelCatalog    // may be nil (no-op)
+	Priority           ProviderPriority // may be nil (legacy order)
 	Log                *logging.Log
 }
 
@@ -40,6 +52,7 @@ func New(cfg Config) *Router {
 		modelToProvider:    m,
 		availableProviders: available,
 		catalog:            cfg.Catalog,
+		priority:           cfg.Priority,
 		log:                cfg.Log,
 	}
 }
@@ -55,6 +68,16 @@ func (r *Router) isAvailable(provider string) bool {
 }
 
 func (r *Router) PickProvider(model string) string {
+	if r.priority != nil {
+		return r.pickWithPriority(model)
+	}
+	return r.pickWithLegacyOrder(model)
+}
+
+// pickWithLegacyOrder is the original staged resolution: exact_mapping →
+// model_matcher → default. First valid candidate wins; existing log keys are
+// preserved unchanged.
+func (r *Router) pickWithLegacyOrder(model string) string {
 	if provider := r.pickFromExactMapping(model); provider != "" {
 		if !r.isAvailable(provider) {
 			r.logSkippedUnavailable(model, provider, "exact_mapping")
@@ -84,6 +107,102 @@ func (r *Router) PickProvider(model string) string {
 		return ""
 	}
 	return r.defaultProvider
+}
+
+type candidate struct {
+	provider string
+	priority int
+	reason   string
+}
+
+// pickWithPriority honours explicit model_to_provider mappings as authoritative
+// (user intent), then ranks matcher and default candidates by priority (desc)
+// with lexicographic name as tiebreaker.
+// Emits provider_selected / provider_candidate_skipped / provider_not_found.
+func (r *Router) pickWithPriority(model string) string {
+	// Explicit mapping is the user's direct choice — honour it immediately.
+	if provider := r.pickFromExactMapping(model); provider != "" {
+		if !r.isAvailable(provider) {
+			r.logSkippedUnavailable(model, provider, "exact_mapping")
+		} else if !r.catalogAllows(provider, model) {
+			r.logSkippedCatalog(model, provider, "exact_mapping")
+		} else {
+			if r.log != nil {
+				r.log.Info("provider_selected", map[string]any{
+					"model":      model,
+					"provider":   provider,
+					"reason":     "exact_mapping",
+					"priority":   r.priority.Priority(provider),
+					"candidates": 1,
+				})
+			}
+			return provider
+		}
+	}
+
+	// No explicit mapping (or it was blocked): rank matcher + default by priority.
+	var candidates []candidate
+	seen := map[string]bool{}
+
+	tryAdd := func(provider, stage string) {
+		if provider == "" || seen[provider] {
+			return
+		}
+		seen[provider] = true
+		if !r.isAvailable(provider) {
+			r.logSkippedUnavailable(model, provider, stage)
+			return
+		}
+		if !r.catalogAllows(provider, model) {
+			r.logSkippedCatalog(model, provider, stage)
+			return
+		}
+		candidates = append(candidates, candidate{
+			provider: provider,
+			priority: r.priority.Priority(provider),
+			reason:   stage,
+		})
+	}
+
+	tryAdd(r.pickFromMatchers(model), "model_matcher")
+	tryAdd(r.defaultProvider, "default")
+
+	if len(candidates) == 0 {
+		if r.log != nil {
+			r.log.Info("provider_not_found", map[string]any{"model": model})
+		}
+		return ""
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].priority != candidates[j].priority {
+			return candidates[i].priority > candidates[j].priority
+		}
+		return candidates[i].provider < candidates[j].provider
+	})
+
+	winner := candidates[0]
+	for _, c := range candidates[1:] {
+		if r.log != nil {
+			r.log.Info("provider_candidate_skipped", map[string]any{
+				"provider": c.provider,
+				"priority": c.priority,
+				"reason":   "lower_priority",
+			})
+		}
+	}
+
+	if r.log != nil {
+		r.log.Info("provider_selected", map[string]any{
+			"model":      model,
+			"provider":   winner.provider,
+			"reason":     winner.reason,
+			"priority":   winner.priority,
+			"candidates": len(candidates),
+		})
+	}
+
+	return winner.provider
 }
 
 func (r *Router) catalogAllows(provider, model string) bool {

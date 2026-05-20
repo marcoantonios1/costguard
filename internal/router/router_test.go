@@ -13,6 +13,15 @@ type stubCatalog struct {
 	supported map[string]map[string]bool
 }
 
+// stubPriority implements ProviderPriority with a fixed priority map.
+type stubPriority struct {
+	priorities map[string]int
+}
+
+func (s *stubPriority) Priority(provider string) int {
+	return s.priorities[provider]
+}
+
 func (s *stubCatalog) ModelSupported(provider, model string) bool {
 	models, ok := s.supported[provider]
 	if !ok {
@@ -112,6 +121,146 @@ func TestPickProvider_UnconstrainedCatalog_AllowsAll(t *testing.T) {
 		Catalog:            &stubCatalog{}, // all unconstrained
 	})
 	got := r.PickProvider("anything")
+	if got != "openai_primary" {
+		t.Errorf("expected openai_primary, got %q", got)
+	}
+}
+
+// --- priority path tests ---
+
+func TestPickProvider_Priority_ExplicitMappingIsAuthoritative(t *testing.T) {
+	// explicit mapping → openai_primary (priority 95)
+	// default          → anthropic_primary (priority 100, higher)
+	// explicit mapping must win regardless of priority
+	r := newRouter(router.Config{
+		DefaultProvider: "anthropic_primary",
+		ModelToProvider: map[string]string{"gpt-4o": "openai_primary"},
+		AvailableProviders: map[string]bool{
+			"openai_primary":    true,
+			"anthropic_primary": true,
+		},
+		Priority: &stubPriority{priorities: map[string]int{
+			"openai_primary":    95,
+			"anthropic_primary": 100,
+		}},
+	})
+	got := r.PickProvider("gpt-4o")
+	if got != "openai_primary" {
+		t.Errorf("explicit mapping must win over higher-priority default, got %q", got)
+	}
+}
+
+func TestPickProvider_Priority_HigherWins_NoExplicitMapping(t *testing.T) {
+	// no explicit mapping: matcher → google_primary (90), default → openai_primary (95)
+	// higher priority default should win
+	r := newRouter(router.Config{
+		DefaultProvider: "openai_primary",
+		AvailableProviders: map[string]bool{
+			"openai_primary": true,
+			"google_primary": true,
+		},
+		Priority: &stubPriority{priorities: map[string]int{
+			"openai_primary": 95,
+			"google_primary": 90,
+		}},
+	})
+	got := r.PickProvider("gemini-2.5-flash")
+	if got != "openai_primary" {
+		t.Errorf("expected openai_primary (higher priority default), got %q", got)
+	}
+}
+
+func TestPickProvider_Priority_LexicographicTiebreaker(t *testing.T) {
+	// no explicit mapping: matcher → openai_primary (80), default → anthropic_primary (80)
+	// equal priority: "anthropic_primary" < "openai_primary" lexicographically → anthropic wins
+	r := newRouter(router.Config{
+		DefaultProvider: "anthropic_primary",
+		AvailableProviders: map[string]bool{
+			"anthropic_primary": true,
+			"openai_primary":    true,
+		},
+		Priority: &stubPriority{priorities: map[string]int{
+			"anthropic_primary": 80,
+			"openai_primary":    80,
+		}},
+	})
+	got := r.PickProvider("gpt-4o")
+	if got != "anthropic_primary" {
+		t.Errorf("expected anthropic_primary (lexicographic tiebreaker), got %q", got)
+	}
+}
+
+func TestPickProvider_Priority_SingleCandidate_ReasonExactMapping(t *testing.T) {
+	r := newRouter(router.Config{
+		DefaultProvider: "openai_primary",
+		ModelToProvider: map[string]string{"gpt-4o": "openai_primary"},
+		AvailableProviders: map[string]bool{
+			"openai_primary": true,
+		},
+		Priority: &stubPriority{priorities: map[string]int{
+			"openai_primary": 95,
+		}},
+	})
+	// Only one candidate (default and exact_mapping both resolve to same provider)
+	got := r.PickProvider("gpt-4o")
+	if got != "openai_primary" {
+		t.Errorf("expected openai_primary, got %q", got)
+	}
+}
+
+func TestPickProvider_Priority_NilLegacyBehaviorUnchanged(t *testing.T) {
+	// Priority=nil → legacy order: exact_mapping wins over default regardless of
+	// what priority values a catalog might report.
+	r := newRouter(router.Config{
+		DefaultProvider: "anthropic_primary",
+		ModelToProvider: map[string]string{"gpt-4o": "openai_primary"},
+		AvailableProviders: map[string]bool{
+			"openai_primary":    true,
+			"anthropic_primary": true,
+		},
+		Priority: nil,
+	})
+	// With legacy order, exact_mapping wins immediately.
+	got := r.PickProvider("gpt-4o")
+	if got != "openai_primary" {
+		t.Errorf("expected openai_primary (legacy exact_mapping wins), got %q", got)
+	}
+}
+
+func TestPickProvider_Priority_NoCandidates_ReturnsEmpty(t *testing.T) {
+	r := newRouter(router.Config{
+		DefaultProvider:    "openai_primary",
+		AvailableProviders: map[string]bool{"openai_primary": false}, // explicitly unavailable
+		Priority:           &stubPriority{},
+	})
+	// gpt-4o matches openai_primary via matcher, but it's unavailable
+	got := r.PickProvider("gpt-4o")
+	if got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+}
+
+func TestPickProvider_Priority_CatalogBlocksCandidate_FallsToNext(t *testing.T) {
+	// exact_mapping → anthropic_primary, but catalog blocks it for gpt-4o
+	// matcher       → openai_primary (unconstrained), allowed
+	// anthropic_primary should not appear as a candidate
+	r := newRouter(router.Config{
+		DefaultProvider: "anthropic_primary",
+		ModelToProvider: map[string]string{"gpt-4o": "anthropic_primary"},
+		AvailableProviders: map[string]bool{
+			"anthropic_primary": true,
+			"openai_primary":    true,
+		},
+		Catalog: &stubCatalog{supported: map[string]map[string]bool{
+			"anthropic_primary": {"claude-sonnet-4-6": true}, // blocks gpt-4o
+		}},
+		Priority: &stubPriority{priorities: map[string]int{
+			"anthropic_primary": 100,
+			"openai_primary":    95,
+		}},
+	})
+	got := r.PickProvider("gpt-4o")
+	// anthropic_primary blocked by catalog; openai_primary wins via matcher
 	if got != "openai_primary" {
 		t.Errorf("expected openai_primary, got %q", got)
 	}

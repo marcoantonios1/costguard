@@ -452,6 +452,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		ModelToProvider:    cfg.Routing.ModelToProvider,
 		AvailableProviders: availableProviders,
 		Catalog:            catalog,
+		Priority:           catalog,
 		Log:                log,
 	})
 
