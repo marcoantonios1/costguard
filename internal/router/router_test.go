@@ -6,6 +6,17 @@ import (
 	"github.com/marcoantonios1/costguard/internal/router"
 )
 
+// stubCostOracle implements CostOracle with a fixed price map.
+type stubCostOracle struct {
+	prices map[string]float64 // key: "provider/model"
+}
+
+func (s *stubCostOracle) InputPricePer1M(provider, model string) (float64, bool) {
+	key := provider + "/" + model
+	p, ok := s.prices[key]
+	return p, ok
+}
+
 // stubCatalog implements ModelCatalog with a fixed allow/deny set.
 type stubCatalog struct {
 	// supported is providerName → set of allowed model IDs.

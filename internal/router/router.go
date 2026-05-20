@@ -137,8 +137,8 @@ func effectiveCost(c candidate) float64 {
 }
 
 // pickWithPriority honours explicit model_to_provider mappings as authoritative
-// (user intent), then ranks matcher and default candidates by priority (desc)
-// with lexicographic name as tiebreaker.
+// (user intent), then ranks matcher and default candidates by priority (desc),
+// cost (asc, +Inf for unknown), and provider name (asc) as final tiebreaker.
 // Emits provider_selected / provider_candidate_skipped / provider_not_found.
 func (r *Router) pickWithPriority(model string) string {
 	// Explicit mapping is the user's direct choice — honour it immediately.
@@ -149,19 +149,26 @@ func (r *Router) pickWithPriority(model string) string {
 			r.logSkippedCatalog(model, provider, "exact_mapping")
 		} else {
 			if r.log != nil {
-				r.log.Info("provider_selected", map[string]any{
+				fields := map[string]any{
 					"model":      model,
 					"provider":   provider,
 					"reason":     "exact_mapping",
 					"priority":   r.priority.Priority(provider),
 					"candidates": 1,
-				})
+				}
+				if r.cost != nil {
+					price, ok := r.cost.InputPricePer1M(provider, model)
+					fields["input_price_per_1m"] = price
+					fields["price_known"] = ok
+				}
+				r.log.Info("provider_selected", fields)
 			}
 			return provider
 		}
 	}
 
-	// No explicit mapping (or it was blocked): rank matcher + default by priority.
+	// No explicit mapping (or it was blocked): rank matcher + default by
+	// priority → cost → name.
 	var candidates []candidate
 	seen := map[string]bool{}
 
@@ -178,11 +185,15 @@ func (r *Router) pickWithPriority(model string) string {
 			r.logSkippedCatalog(model, provider, stage)
 			return
 		}
-		candidates = append(candidates, candidate{
+		c := candidate{
 			provider: provider,
 			priority: r.priority.Priority(provider),
 			reason:   stage,
-		})
+		}
+		if r.cost != nil {
+			c.cost, c.priceKnown = r.cost.InputPricePer1M(provider, model)
+		}
+		candidates = append(candidates, c)
 	}
 
 	tryAdd(r.pickFromMatchers(model), "model_matcher")
@@ -199,28 +210,42 @@ func (r *Router) pickWithPriority(model string) string {
 		if candidates[i].priority != candidates[j].priority {
 			return candidates[i].priority > candidates[j].priority
 		}
+		ci, cj := effectiveCost(candidates[i]), effectiveCost(candidates[j])
+		if ci != cj {
+			return ci < cj
+		}
 		return candidates[i].provider < candidates[j].provider
 	})
 
 	winner := candidates[0]
 	for _, c := range candidates[1:] {
 		if r.log != nil {
-			r.log.Info("provider_candidate_skipped", map[string]any{
+			fields := map[string]any{
 				"provider": c.provider,
 				"priority": c.priority,
 				"reason":   "lower_priority",
-			})
+			}
+			if r.cost != nil {
+				fields["input_price_per_1m"] = c.cost
+				fields["price_known"] = c.priceKnown
+			}
+			r.log.Info("provider_candidate_skipped", fields)
 		}
 	}
 
 	if r.log != nil {
-		r.log.Info("provider_selected", map[string]any{
+		fields := map[string]any{
 			"model":      model,
 			"provider":   winner.provider,
 			"reason":     winner.reason,
 			"priority":   winner.priority,
 			"candidates": len(candidates),
-		})
+		}
+		if r.cost != nil {
+			fields["input_price_per_1m"] = winner.cost
+			fields["price_known"] = winner.priceKnown
+		}
+		r.log.Info("provider_selected", fields)
 	}
 
 	return winner.provider
