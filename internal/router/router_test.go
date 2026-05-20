@@ -212,9 +212,10 @@ func TestPickProvider_Priority_NilLegacyBehaviorUnchanged(t *testing.T) {
 func TestPickProvider_Priority_NoCandidates_ReturnsEmpty(t *testing.T) {
 	r := newRouter(router.Config{
 		DefaultProvider:    "openai_primary",
-		AvailableProviders: map[string]bool{}, // nothing available
+		AvailableProviders: map[string]bool{"openai_primary": false}, // explicitly unavailable
 		Priority:           &stubPriority{},
 	})
+	// gpt-4o matches openai_primary via matcher, but it's unavailable
 	got := r.PickProvider("gpt-4o")
 	if got != "" {
 		t.Errorf("expected empty string, got %q", got)
