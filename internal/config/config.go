@@ -124,6 +124,14 @@ type AdminConfig struct {
 	APIKey string `json:"api_key"`
 }
 
+// BreakerPolicy configures the per-provider circuit breaker.
+// Zero values fall back to the gateway-level defaults (threshold=5, cooldown=30s).
+type BreakerPolicy struct {
+	FailureThreshold int  `json:"failure_threshold"` // 0 = default (5)
+	CooldownSeconds  int  `json:"cooldown_seconds"`  // 0 = default (30)
+	Disabled         bool `json:"disabled"`
+}
+
 // RetryPolicy configures per-attempt retry behaviour for a provider.
 // MaxAttempts=1 (the default) means a single attempt with no retry loop.
 type RetryPolicy struct {
