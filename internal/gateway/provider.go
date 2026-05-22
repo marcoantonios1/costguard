@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marcoantonios1/costguard/internal/breaker"
 	"github.com/marcoantonios1/costguard/internal/health"
 	"github.com/marcoantonios1/costguard/internal/providers"
 	"github.com/marcoantonios1/costguard/internal/server"
@@ -104,7 +105,7 @@ func (g *Gateway) providerRetryPolicy(providerName string) RetryPolicy {
 }
 
 func (g *Gateway) callProviderWithFallback(r *http.Request, providerName string, bodyBytes []byte, originalModel string) (*http.Response, string, string, error) {
-	resp, err := g.callSingleProvider(r, providerName, bodyBytes, g.providerRetryPolicy(providerName))
+	resp, err := g.callThroughBreaker(r, providerName, bodyBytes)
 	if err == nil {
 		return resp, providerName, originalModel, nil
 	}
@@ -138,7 +139,7 @@ func (g *Gateway) callProviderWithFallback(r *http.Request, providerName string,
 		})
 	}
 
-	fallbackResp, fallbackErr := g.callSingleProvider(r, g.fallback, rewrittenBody, g.providerRetryPolicy(g.fallback))
+	fallbackResp, fallbackErr := g.callThroughBreaker(r, g.fallback, rewrittenBody)
 	if fallbackErr != nil {
 		if g.log != nil {
 			category, _ := gatewayErrorCategoryAndType(fallbackErr)
@@ -166,6 +167,55 @@ func (g *Gateway) callProviderWithFallback(r *http.Request, providerName string,
 	}
 
 	return fallbackResp, g.fallback, fallbackModel, nil
+}
+
+// callThroughBreaker gates a single provider call through the circuit breaker:
+// pre-check → callSingleProvider → record outcome.
+func (g *Gateway) callThroughBreaker(r *http.Request, providerName string, bodyBytes []byte) (*http.Response, error) {
+	if g.breakers != nil {
+		b := g.breakers.For(providerName)
+		if allowed, state := b.Allow(); !allowed {
+			if g.log != nil {
+				g.log.Warn("circuit_breaker_open", map[string]any{
+					"request_id": server.RequestIDFromContext(r.Context()),
+					"provider":   providerName,
+					"state":      string(state),
+				})
+			}
+			return nil, fmt.Errorf("circuit_breaker_open provider=%s", providerName)
+		}
+	}
+
+	resp, err := g.callSingleProvider(r, providerName, bodyBytes, g.providerRetryPolicy(providerName))
+
+	if g.breakers != nil {
+		b := g.breakers.For(providerName)
+		if err != nil {
+			prevState := b.State()
+			category, _ := gatewayErrorCategoryAndType(err)
+			b.RecordFailure(category)
+			if b.State() == breaker.StateOpen && prevState == breaker.StateClosed {
+				if g.log != nil {
+					g.log.Warn("circuit_breaker_tripped", map[string]any{
+						"request_id": server.RequestIDFromContext(r.Context()),
+						"provider":   providerName,
+						"threshold":  b.Stats().ConsecFailures,
+					})
+				}
+			}
+		} else {
+			prevState := b.State()
+			b.RecordSuccess()
+			if prevState == breaker.StateHalfOpen && g.log != nil {
+				g.log.Info("circuit_breaker_closed", map[string]any{
+					"request_id": server.RequestIDFromContext(r.Context()),
+					"provider":   providerName,
+				})
+			}
+		}
+	}
+
+	return resp, err
 }
 
 func (g *Gateway) callSingleProvider(r *http.Request, providerName string, bodyBytes []byte, policy RetryPolicy) (*http.Response, error) {
@@ -273,6 +323,8 @@ func isRetryableProviderError(err error) bool {
 	msg := strings.ToLower(err.Error())
 
 	switch {
+	case strings.Contains(msg, "circuit_breaker_open"):
+		return true
 	case strings.Contains(msg, "provider not found"):
 		return true
 	case strings.Contains(msg, "upstream_5xx"):

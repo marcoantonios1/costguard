@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/marcoantonios1/costguard/internal/breaker"
 	"github.com/marcoantonios1/costguard/internal/health"
 	"github.com/marcoantonios1/costguard/internal/providers"
 )
@@ -13,6 +14,12 @@ import (
 // *health.Tracker satisfies this interface.
 type HealthStatsReader interface {
 	Snapshot(provider string) health.Snapshot
+}
+
+// BreakerStatsReader surfaces per-provider circuit-breaker stats.
+// *breaker.Registry satisfies this interface.
+type BreakerStatsReader interface {
+	AllStats() map[string]breaker.Stats
 }
 
 type ProviderHealthEntry struct {
@@ -37,6 +44,10 @@ type ProviderHealthEntry struct {
 	SuccessRate  float64 `json:"success_rate"`
 	AvgLatencyMS float64 `json:"avg_latency_ms"`
 	LastError    string  `json:"last_error,omitempty"`
+	// Circuit-breaker state; omitted when no breaker data is available.
+	BreakerState    string     `json:"breaker_state,omitempty"`
+	BreakerFailures int        `json:"breaker_consecutive_failures,omitempty"`
+	BreakerTripTime *time.Time `json:"breaker_trip_time,omitempty"`
 }
 
 func toHealthEntry(m providers.RuntimeMetadata) ProviderHealthEntry {
@@ -64,12 +75,19 @@ func toHealthEntry(m providers.RuntimeMetadata) ProviderHealthEntry {
 	}
 }
 
-func ProviderHealthHandler(catalog ProviderCatalogReader, stats HealthStatsReader) http.HandlerFunc {
+func ProviderHealthHandler(catalog ProviderCatalogReader, stats HealthStatsReader, breakers BreakerStatsReader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		list := catalog.List()
+
+		var breakerStats map[string]breaker.Stats
+		if breakers != nil {
+			breakerStats = breakers.AllStats()
+		}
+
 		entries := make([]ProviderHealthEntry, len(list))
 		for i, m := range list {
 			e := toHealthEntry(m)
+
 			if stats != nil {
 				snap := stats.Snapshot(m.Name)
 				e.Total = snap.Total
@@ -79,8 +97,19 @@ func ProviderHealthHandler(catalog ProviderCatalogReader, stats HealthStatsReade
 				e.AvgLatencyMS = snap.AvgLatencyMS
 				e.LastError = snap.LastError
 			}
+
+			if bs, ok := breakerStats[m.Name]; ok {
+				e.BreakerState = string(bs.State)
+				e.BreakerFailures = bs.ConsecFailures
+				if !bs.TripTime.IsZero() {
+					t := bs.TripTime
+					e.BreakerTripTime = &t
+				}
+			}
+
 			entries[i] = e
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"providers": entries,

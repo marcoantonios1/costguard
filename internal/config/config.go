@@ -124,6 +124,14 @@ type AdminConfig struct {
 	APIKey string `json:"api_key"`
 }
 
+// BreakerPolicy configures the per-provider circuit breaker.
+// Zero values fall back to the gateway-level defaults (threshold=5, cooldown=30s).
+type BreakerPolicy struct {
+	FailureThreshold int  `json:"failure_threshold"` // 0 = default (5)
+	CooldownSeconds  int  `json:"cooldown_seconds"`  // 0 = default (30)
+	Disabled         bool `json:"disabled"`
+}
+
 // RetryPolicy configures per-attempt retry behaviour for a provider.
 // MaxAttempts=1 (the default) means a single attempt with no retry loop.
 type RetryPolicy struct {
@@ -142,6 +150,7 @@ type OpenAIProvider struct {
 	Timeout  time.Duration    `json:"timeout"`
 	Metadata ProviderMetadata `json:"metadata"`
 	Retry    RetryPolicy      `json:"retry"`
+	Breaker  BreakerPolicy    `json:"breaker,omitempty"`
 }
 
 type AnthropicProvider struct {
@@ -151,6 +160,7 @@ type AnthropicProvider struct {
 	Timeout          time.Duration    `json:"timeout"`
 	Metadata         ProviderMetadata `json:"metadata"`
 	Retry            RetryPolicy      `json:"retry"`
+	Breaker          BreakerPolicy    `json:"breaker,omitempty"`
 }
 
 type GeminiProvider struct {
@@ -159,6 +169,7 @@ type GeminiProvider struct {
 	Timeout  time.Duration    `json:"timeout"`
 	Metadata ProviderMetadata `json:"metadata"`
 	Retry    RetryPolicy      `json:"retry"`
+	Breaker  BreakerPolicy    `json:"breaker,omitempty"`
 }
 
 type OpenAICompatibleProvider struct {
@@ -168,6 +179,7 @@ type OpenAICompatibleProvider struct {
 	AllowMultimodal bool             `json:"allow_multimodal"`
 	Metadata        ProviderMetadata `json:"metadata"`
 	Retry           RetryPolicy      `json:"retry"`
+	Breaker         BreakerPolicy    `json:"breaker,omitempty"`
 }
 
 type ProviderMetadata struct {
@@ -245,6 +257,7 @@ func Load(path string) (Config, error) {
 		Timeout  string              `json:"timeout"`
 		Metadata rawProviderMetadata `json:"metadata"`
 		Retry    rawRetryPolicy      `json:"retry"`
+		Breaker  BreakerPolicy       `json:"breaker"`
 	}
 
 	type rawAnthropicProvider struct {
@@ -254,6 +267,7 @@ func Load(path string) (Config, error) {
 		Timeout          string              `json:"timeout"`
 		Metadata         rawProviderMetadata `json:"metadata"`
 		Retry            rawRetryPolicy      `json:"retry"`
+		Breaker          BreakerPolicy       `json:"breaker"`
 	}
 
 	type rawGeminiProvider struct {
@@ -262,6 +276,7 @@ func Load(path string) (Config, error) {
 		Timeout  string              `json:"timeout"`
 		Metadata rawProviderMetadata `json:"metadata"`
 		Retry    rawRetryPolicy      `json:"retry"`
+		Breaker  BreakerPolicy       `json:"breaker"`
 	}
 
 	type rawOpenAICompatibleProvider struct {
@@ -271,6 +286,7 @@ func Load(path string) (Config, error) {
 		AllowMultimodal bool                `json:"allow_multimodal"`
 		Metadata        rawProviderMetadata `json:"metadata"`
 		Retry           rawRetryPolicy      `json:"retry"`
+		Breaker         BreakerPolicy       `json:"breaker"`
 	}
 
 	type rawReports struct {
@@ -389,6 +405,7 @@ func Load(path string) (Config, error) {
 			Timeout:  to,
 			Metadata: normalizeProviderMetadata(p.Metadata),
 			Retry:    retry,
+			Breaker:  p.Breaker,
 		}
 	}
 
@@ -413,6 +430,7 @@ func Load(path string) (Config, error) {
 			Timeout:          to,
 			Metadata:         normalizeProviderMetadata(p.Metadata),
 			Retry:            retry,
+			Breaker:          p.Breaker,
 		}
 	}
 
@@ -436,6 +454,7 @@ func Load(path string) (Config, error) {
 			Timeout:  to,
 			Metadata: normalizeProviderMetadata(p.Metadata),
 			Retry:    retry,
+			Breaker:  p.Breaker,
 		}
 	}
 
@@ -460,6 +479,7 @@ func Load(path string) (Config, error) {
 			AllowMultimodal: p.AllowMultimodal,
 			Metadata:        normalizeProviderMetadata(p.Metadata),
 			Retry:           retry,
+			Breaker:         p.Breaker,
 		}
 	}
 

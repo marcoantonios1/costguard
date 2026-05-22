@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/marcoantonios1/costguard/internal/alert"
+	"github.com/marcoantonios1/costguard/internal/breaker"
 	"github.com/marcoantonios1/costguard/internal/health"
 	"github.com/marcoantonios1/costguard/internal/budget"
 	"github.com/marcoantonios1/costguard/internal/cache"
@@ -500,6 +501,34 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 
 	healthTracker := health.New(100)
 
+	breakerRegistry := breaker.NewRegistry(breaker.DefaultPolicy())
+	applyBreakerPolicy := func(name string, bp config.BreakerPolicy) {
+		if bp.Disabled {
+			breakerRegistry.SetPolicy(name, breaker.Policy{Disabled: true})
+			return
+		}
+		p := breaker.DefaultPolicy()
+		if bp.FailureThreshold > 0 {
+			p.FailureThreshold = bp.FailureThreshold
+		}
+		if bp.CooldownSeconds > 0 {
+			p.CooldownDuration = time.Duration(bp.CooldownSeconds) * time.Second
+		}
+		breakerRegistry.SetPolicy(name, p)
+	}
+	for name, p := range cfg.Providers.OpenAI {
+		applyBreakerPolicy(name, p.Breaker)
+	}
+	for name, p := range cfg.Providers.Anthropic {
+		applyBreakerPolicy(name, p.Breaker)
+	}
+	for name, p := range cfg.Providers.Gemini {
+		applyBreakerPolicy(name, p.Breaker)
+	}
+	for name, p := range cfg.Providers.OpenAICompatible {
+		applyBreakerPolicy(name, p.Breaker)
+	}
+
 	rt := router.New(router.Config{
 		DefaultProvider:    cfg.Routing.DefaultProvider,
 		ModelToProvider:    cfg.Routing.ModelToProvider,
@@ -579,6 +608,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		Notifier:              notifier,
 		ProviderRetryPolicies: retryPolicies,
 		Health:                healthTracker,
+		Breakers:              breakerRegistry,
 
 		AudioTranscriptionProvider: cfg.Audio.TranscriptionProvider,
 		AudioTranscriptionURL:      cfg.Audio.TranscriptionURL,
@@ -606,6 +636,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		ProviderCatalog: catalog,
 		ModeToProvider:  cfg.Routing.ModeToProvider,
 		HealthTracker:   healthTracker,
+		BreakerStats:    breakerRegistry,
 	})
 
 	protectedAdmin := server.AdminAuth(cfg.Admin.APIKey)(adminMux)

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marcoantonios1/costguard/internal/breaker"
 	"github.com/marcoantonios1/costguard/internal/cache"
 	"github.com/marcoantonios1/costguard/internal/health"
 	"github.com/marcoantonios1/costguard/internal/logging"
@@ -18,6 +19,12 @@ import (
 // *health.Tracker satisfies this interface.
 type HealthRecorder interface {
 	Record(provider string, o health.Outcome)
+}
+
+// BreakerGate is the subset of *breaker.Registry the gateway needs.
+// *breaker.Registry satisfies this interface.
+type BreakerGate interface {
+	For(providerName string) *breaker.Breaker
 }
 
 type Router interface {
@@ -53,6 +60,7 @@ type Gateway struct {
 	modeToProvider     map[string]string
 	retryPolicies      map[string]RetryPolicy
 	health             HealthRecorder
+	breakers           BreakerGate
 
 	audioTranscriptionProvider string
 	audioTranscriptionURL      string
@@ -78,6 +86,7 @@ type Deps struct {
 	ModeToProvider        map[string]string
 	ProviderRetryPolicies map[string]RetryPolicy
 	Health                HealthRecorder
+	Breakers              BreakerGate
 
 	AudioTranscriptionProvider string
 	AudioTranscriptionURL      string
@@ -129,6 +138,7 @@ func New(d Deps) (*Gateway, error) {
 		modeToProvider:     modeMap,
 		retryPolicies:      retryPolicies,
 		health:             d.Health,
+		breakers:           d.Breakers,
 
 		audioTranscriptionProvider: d.AudioTranscriptionProvider,
 		audioTranscriptionURL:      d.AudioTranscriptionURL,
