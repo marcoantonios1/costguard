@@ -636,6 +636,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		ProviderCatalog: catalog,
 		ModeToProvider:  cfg.Routing.ModeToProvider,
 		HealthTracker:   healthTracker,
+		BreakerStats:    breakerRegistry,
 	})
 
 	protectedAdmin := server.AdminAuth(cfg.Admin.APIKey)(adminMux)
