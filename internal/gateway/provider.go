@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/marcoantonios1/costguard/internal/providers"
 	"github.com/marcoantonios1/costguard/internal/server"
 )
 
@@ -68,6 +69,31 @@ func (g *Gateway) maybeStoreAndReturn(
 	return responseFromCacheEntry(r, entry), nil
 }
 
+// gatewayErrorCategoryAndType derives the taxonomy category and normalized type
+// string from a gateway-level error (network, timeout, or upstream_5xx).
+func gatewayErrorCategoryAndType(err error) (category, errType string) {
+	if err == nil {
+		return providers.ErrCategoryUpstreamFailure, "upstream_error"
+	}
+	if isTimeoutError(err) || strings.Contains(err.Error(), "provider_timeout") {
+		return providers.ErrCategoryProviderUnavailable, "provider_unavailable_error"
+	}
+	if is5xxError(err) {
+		return providers.ErrCategoryUpstreamFailure, "upstream_error"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return providers.ErrCategoryProviderUnavailable, "provider_unavailable_error"
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "dial tcp") ||
+		strings.Contains(msg, "no such host") {
+		return providers.ErrCategoryProviderUnavailable, "provider_unavailable_error"
+	}
+	return providers.ErrCategoryUpstreamFailure, "upstream_error"
+}
+
 func (g *Gateway) providerRetryPolicy(providerName string) RetryPolicy {
 	if p, ok := g.retryPolicies[providerName]; ok {
 		return p
@@ -98,6 +124,7 @@ func (g *Gateway) callProviderWithFallback(r *http.Request, providerName string,
 	}
 
 	if g.log != nil {
+		category, _ := gatewayErrorCategoryAndType(err)
 		g.log.Error("provider_failed_try_fallback", map[string]any{
 			"request_id":     server.RequestIDFromContext(r.Context()),
 			"primary":        providerName,
@@ -105,12 +132,14 @@ func (g *Gateway) callProviderWithFallback(r *http.Request, providerName string,
 			"original_model": originalModel,
 			"fallback_model": fallbackModel,
 			"err":            err.Error(),
+			"error_category": category,
 		})
 	}
 
 	fallbackResp, fallbackErr := g.callSingleProvider(r, g.fallback, rewrittenBody, g.providerRetryPolicy(g.fallback))
 	if fallbackErr != nil {
 		if g.log != nil {
+			category, _ := gatewayErrorCategoryAndType(fallbackErr)
 			g.log.Error("fallback_failed", map[string]any{
 				"request_id":     server.RequestIDFromContext(r.Context()),
 				"primary":        providerName,
@@ -118,6 +147,7 @@ func (g *Gateway) callProviderWithFallback(r *http.Request, providerName string,
 				"original_model": originalModel,
 				"fallback_model": fallbackModel,
 				"err":            fallbackErr.Error(),
+				"error_category": category,
 			})
 		}
 		return nil, g.fallback, fallbackModel, fallbackErr
