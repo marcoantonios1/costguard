@@ -332,7 +332,6 @@ func (c *Client) ParseResponseMeta(body []byte) (providers.ResponseMeta, error) 
 }
 
 func (c *Client) NormalizeError(statusCode int, body []byte) ([]byte, error) {
-	// Anthropic errors usually look different, so normalize them.
 	var raw struct {
 		Type  string `json:"type"`
 		Error struct {
@@ -350,11 +349,13 @@ func (c *Client) NormalizeError(statusCode int, body []byte) ([]byte, error) {
 			if out.Error.Type == "" {
 				out.Error.Type = "upstream_error"
 			}
+			out.Error.Category = providers.ErrorCategory(out.Error.Type, statusCode)
 			return json.Marshal(out)
 		}
 	}
 
 	out.Error.Message = http.StatusText(statusCode)
 	out.Error.Type = "upstream_error"
+	out.Error.Category = providers.ErrorCategory(out.Error.Type, statusCode)
 	return json.Marshal(out)
 }

@@ -2,13 +2,40 @@ package gateway
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/marcoantonios1/costguard/internal/cache"
+	"github.com/marcoantonios1/costguard/internal/providers"
 )
+
+// newJSONErrorResponseCategorized builds a JSON error response that includes
+// the taxonomy category and normalized type string in the body.
+func newJSONErrorResponseCategorized(r *http.Request, status int, message, errType, category string) *http.Response {
+	var out providers.ErrorBody
+	out.Error.Message = message
+	out.Error.Type = errType
+	out.Error.Category = category
+
+	body, err := json.Marshal(out)
+	if err != nil {
+		body = []byte(`{"error":{"message":"internal error"}}`)
+	}
+
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	return &http.Response{
+		StatusCode: status,
+		Status:     fmt.Sprintf("%d %s", status, http.StatusText(status)),
+		Header:     header,
+		Body:       io.NopCloser(bytes.NewReader(body)),
+		Request:    r,
+	}
+}
 
 func newJSONErrorResponse(r *http.Request, status int, message string) *http.Response {
 	body := fmt.Sprintf(`{"error":{"message":"%s"}}`, message)

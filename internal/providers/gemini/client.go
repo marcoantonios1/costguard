@@ -340,11 +340,13 @@ func (c *Client) NormalizeError(statusCode int, body []byte) ([]byte, error) {
 		out.Error.Message = raw.Error.Message
 		out.Error.Type = geminiStatusToErrorType(raw.Error.Status)
 		out.Error.Code = raw.Error.Status
+		out.Error.Category = providers.ErrorCategory(out.Error.Type, statusCode)
 		return json.Marshal(out)
 	}
 
 	out.Error.Message = http.StatusText(statusCode)
 	out.Error.Type = "upstream_error"
+	out.Error.Category = providers.ErrorCategory(out.Error.Type, statusCode)
 	return json.Marshal(out)
 }
 

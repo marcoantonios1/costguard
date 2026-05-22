@@ -215,6 +215,57 @@ func TestDo_MixedTextAndImageBlocksForwardedUnchanged(t *testing.T) {
 	}
 }
 
+func TestNormalizeError_OpenAI_ServerErrorRemapped(t *testing.T) {
+	body := []byte(`{"error":{"message":"The server had an error processing your request.","type":"server_error"}}`)
+	out, err := newOpenAIClient().NormalizeError(http.StatusInternalServerError, body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	parsed := parseErrorBody(t, out)
+	if parsed.Error.Type != "upstream_error" {
+		t.Errorf("type: got %q, want upstream_error (server_error must be remapped)", parsed.Error.Type)
+	}
+	if parsed.Error.Category != "upstream_failure" {
+		t.Errorf("category: got %q, want upstream_failure", parsed.Error.Category)
+	}
+}
+
+func TestNormalizeError_OpenAI_429SetsRateLimitCategory(t *testing.T) {
+	body := []byte(`{"error":{"message":"Rate limit reached.","type":"requests","code":"rate_limit_exceeded"}}`)
+	out, err := newOpenAIClient().NormalizeError(http.StatusTooManyRequests, body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	parsed := parseErrorBody(t, out)
+	if parsed.Error.Category != "rate_limit" {
+		t.Errorf("category: got %q, want rate_limit", parsed.Error.Category)
+	}
+}
+
+func TestNormalizeError_OpenAI_CategoryPresentOnAllPaths(t *testing.T) {
+	cases := []struct {
+		name   string
+		body   []byte
+		status int
+	}{
+		{"valid_body", []byte(`{"error":{"message":"bad input","type":"invalid_request_error"}}`), 400},
+		{"empty_body", []byte(`{}`), 500},
+		{"unparseable", []byte(`not json`), 502},
+	}
+	c := newOpenAIClient()
+	for _, tc := range cases {
+		out, err := c.NormalizeError(tc.status, tc.body)
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", tc.name, err)
+			continue
+		}
+		parsed := parseErrorBody(t, out)
+		if parsed.Error.Category == "" {
+			t.Errorf("%s: category is empty", tc.name)
+		}
+	}
+}
+
 func TestNormalizeError_OpenAI_OutputIsValidErrorBodyShape(t *testing.T) {
 	bodies := [][]byte{
 		[]byte(`{"error":{"message":"Invalid function name","type":"invalid_request_error"}}`),

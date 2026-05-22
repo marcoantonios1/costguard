@@ -319,7 +319,17 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 
 	resp, actualProvider, finalModel, err := g.callProviderWithFallback(r, providerName, effectiveBodyBytes, effectiveModel)
 	if err != nil {
-		return nil, err
+		category, errType := gatewayErrorCategoryAndType(err)
+		if g.log != nil {
+			g.log.Error("provider_error", map[string]any{
+				"request_id":     server.RequestIDFromContext(r.Context()),
+				"provider":       providerName,
+				"error_category": category,
+				"err":            err.Error(),
+				"path":           r.URL.Path,
+			})
+		}
+		return newJSONErrorResponseCategorized(r, http.StatusBadGateway, err.Error(), errType, category), nil
 	}
 
 	if g.log != nil && actualProvider != requestedProvider {
