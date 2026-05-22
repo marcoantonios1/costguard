@@ -38,7 +38,7 @@ func TestProviderHealthHandler_StatusDerivedFromEnabled(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/providers/health", nil)
 	w := httptest.NewRecorder()
-	admin.ProviderHealthHandler(catalog, nil)(w, req)
+	admin.ProviderHealthHandler(catalog, nil, nil)(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -91,7 +91,7 @@ func TestProviderHealthHandler_CheckedAtPresent(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/providers/health", nil)
 	w := httptest.NewRecorder()
-	admin.ProviderHealthHandler(catalog, nil)(w, req)
+	admin.ProviderHealthHandler(catalog, nil, nil)(w, req)
 
 	var resp struct {
 		Providers []struct {
@@ -111,7 +111,7 @@ func TestProviderHealthHandler_EmptyCatalog(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/providers/health", nil)
 	w := httptest.NewRecorder()
-	admin.ProviderHealthHandler(catalog, nil)(w, req)
+	admin.ProviderHealthHandler(catalog, nil, nil)(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
