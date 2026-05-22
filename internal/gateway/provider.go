@@ -8,7 +8,9 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/marcoantonios1/costguard/internal/health"
 	"github.com/marcoantonios1/costguard/internal/providers"
 	"github.com/marcoantonios1/costguard/internal/server"
 )
@@ -176,8 +178,17 @@ func (g *Gateway) callSingleProvider(r *http.Request, providerName string, bodyB
 
 		reqCopy := cloneRequestWithBody(r, bodyBytes)
 
+		start := time.Now()
 		resp, err := p.Do(reqCopy.Context(), reqCopy)
+		latency := time.Since(start)
+
 		if err != nil {
+			g.recordOutcome(providerName, health.Outcome{
+				Success:       false,
+				Latency:       latency,
+				Timestamp:     time.Now(),
+				ErrorCategory: providers.ErrCategoryProviderUnavailable,
+			})
 			return nil, err
 		}
 
@@ -185,11 +196,23 @@ func (g *Gateway) callSingleProvider(r *http.Request, providerName string, bodyB
 			body, readErr := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
 			if readErr != nil {
+				g.recordOutcome(providerName, health.Outcome{
+					Success:       false,
+					Latency:       latency,
+					Timestamp:     time.Now(),
+					ErrorCategory: providers.ErrCategoryUpstreamFailure,
+				})
 				return nil, readErr
 			}
 
 			normalizedBody, normErr := p.NormalizeError(resp.StatusCode, body)
 			if normErr != nil {
+				g.recordOutcome(providerName, health.Outcome{
+					Success:       false,
+					Latency:       latency,
+					Timestamp:     time.Now(),
+					ErrorCategory: providers.ErrCategoryUpstreamFailure,
+				})
 				return nil, normErr
 			}
 
@@ -198,14 +221,37 @@ func (g *Gateway) callSingleProvider(r *http.Request, providerName string, bodyB
 			resp.Header.Set("Content-Type", "application/json")
 
 			if resp.StatusCode >= 500 {
+				g.recordOutcome(providerName, health.Outcome{
+					Success:       false,
+					Latency:       latency,
+					Timestamp:     time.Now(),
+					ErrorCategory: providers.ErrCategoryUpstreamFailure,
+				})
 				return nil, fmt.Errorf("upstream_5xx status=%d provider=%s", resp.StatusCode, providerName)
 			}
 
+			g.recordOutcome(providerName, health.Outcome{
+				Success:       false,
+				Latency:       latency,
+				Timestamp:     time.Now(),
+				ErrorCategory: providers.ErrorCategory("", resp.StatusCode),
+			})
 			return resp, nil
 		}
 
+		g.recordOutcome(providerName, health.Outcome{
+			Success:   true,
+			Latency:   latency,
+			Timestamp: time.Now(),
+		})
 		return resp, nil
 	})
+}
+
+func (g *Gateway) recordOutcome(provider string, o health.Outcome) {
+	if g.health != nil {
+		g.health.Record(provider, o)
+	}
 }
 
 func isRetryableProviderError(err error) bool {

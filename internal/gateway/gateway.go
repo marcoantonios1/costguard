@@ -7,11 +7,18 @@ import (
 	"time"
 
 	"github.com/marcoantonios1/costguard/internal/cache"
+	"github.com/marcoantonios1/costguard/internal/health"
 	"github.com/marcoantonios1/costguard/internal/logging"
 	"github.com/marcoantonios1/costguard/internal/notify"
 	"github.com/marcoantonios1/costguard/internal/providers"
 	"github.com/marcoantonios1/costguard/internal/usage"
 )
+
+// HealthRecorder records the outcome of each upstream call for health tracking.
+// *health.Tracker satisfies this interface.
+type HealthRecorder interface {
+	Record(provider string, o health.Outcome)
+}
 
 type Router interface {
 	PickProvider(model string) string
@@ -45,6 +52,7 @@ type Gateway struct {
 	notifier           Notifier
 	modeToProvider     map[string]string
 	retryPolicies      map[string]RetryPolicy
+	health             HealthRecorder
 
 	audioTranscriptionProvider string
 	audioTranscriptionURL      string
@@ -69,6 +77,7 @@ type Deps struct {
 	Notifier              Notifier
 	ModeToProvider        map[string]string
 	ProviderRetryPolicies map[string]RetryPolicy
+	Health                HealthRecorder
 
 	AudioTranscriptionProvider string
 	AudioTranscriptionURL      string
@@ -119,6 +128,7 @@ func New(d Deps) (*Gateway, error) {
 		notifier:           d.Notifier,
 		modeToProvider:     modeMap,
 		retryPolicies:      retryPolicies,
+		health:             d.Health,
 
 		audioTranscriptionProvider: d.AudioTranscriptionProvider,
 		audioTranscriptionURL:      d.AudioTranscriptionURL,
