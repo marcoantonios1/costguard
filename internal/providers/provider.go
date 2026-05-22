@@ -5,6 +5,15 @@ import (
 	"net/http"
 )
 
+// Canonical error categories surfaced in logs and client-facing error bodies.
+const (
+	ErrCategoryAuth               = "auth"
+	ErrCategoryInvalidRequest     = "invalid_request"
+	ErrCategoryRateLimit          = "rate_limit"
+	ErrCategoryProviderUnavailable = "provider_unavailable"
+	ErrCategoryUpstreamFailure    = "upstream_failure"
+)
+
 type ResponseMeta struct {
 	Model            string
 	PromptTokens     int
@@ -14,10 +23,36 @@ type ResponseMeta struct {
 
 type ErrorBody struct {
 	Error struct {
-		Message string `json:"message"`
-		Type    string `json:"type,omitempty"`
-		Code    string `json:"code,omitempty"`
+		Message  string `json:"message"`
+		Type     string `json:"type,omitempty"`
+		Code     string `json:"code,omitempty"`
+		Category string `json:"category,omitempty"`
 	} `json:"error"`
+}
+
+// ErrorCategory derives the canonical category from a normalized error type
+// string and the upstream HTTP status code. Type takes precedence over status.
+func ErrorCategory(errType string, statusCode int) string {
+	switch errType {
+	case "authentication_error", "permission_error":
+		return ErrCategoryAuth
+	case "invalid_request_error":
+		return ErrCategoryInvalidRequest
+	case "rate_limit_error":
+		return ErrCategoryRateLimit
+	}
+	switch statusCode {
+	case 401, 403:
+		return ErrCategoryAuth
+	case 400, 422:
+		return ErrCategoryInvalidRequest
+	case 429:
+		return ErrCategoryRateLimit
+	case 502, 503, 504:
+		return ErrCategoryProviderUnavailable
+	default:
+		return ErrCategoryUpstreamFailure
+	}
 }
 
 type Provider interface {
