@@ -77,6 +77,7 @@ type Deps struct {
 	Notifier              Notifier
 	ModeToProvider        map[string]string
 	ProviderRetryPolicies map[string]RetryPolicy
+	Health                HealthRecorder
 
 	AudioTranscriptionProvider string
 	AudioTranscriptionURL      string
@@ -127,6 +128,7 @@ func New(d Deps) (*Gateway, error) {
 		notifier:           d.Notifier,
 		modeToProvider:     modeMap,
 		retryPolicies:      retryPolicies,
+		health:             d.Health,
 
 		audioTranscriptionProvider: d.AudioTranscriptionProvider,
 		audioTranscriptionURL:      d.AudioTranscriptionURL,
