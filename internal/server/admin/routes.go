@@ -17,6 +17,7 @@ type Deps struct {
 	Budget          *budget.Service
 	ProviderCatalog *providers.Catalog
 	ModeToProvider  map[string]string
+	HealthTracker   HealthStatsReader
 }
 
 func Register(mux *http.ServeMux, d Deps) {
@@ -39,7 +40,7 @@ func Register(mux *http.ServeMux, d Deps) {
 
 	if d.ProviderCatalog != nil {
 		mux.HandleFunc("/providers", ProvidersHandler(d.ProviderCatalog))
-		mux.HandleFunc("/providers/health", ProviderHealthHandler(d.ProviderCatalog))
+		mux.HandleFunc("/providers/health", ProviderHealthHandler(d.ProviderCatalog, d.HealthTracker))
 		mux.HandleFunc("/providers/{name}/models", ProviderModelsHandler(d.ProviderCatalog))
 	}
 

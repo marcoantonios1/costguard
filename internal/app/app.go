@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/marcoantonios1/costguard/internal/alert"
+	"github.com/marcoantonios1/costguard/internal/health"
 	"github.com/marcoantonios1/costguard/internal/budget"
 	"github.com/marcoantonios1/costguard/internal/cache"
 	"github.com/marcoantonios1/costguard/internal/config"
@@ -497,6 +498,8 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		})
 	}
 
+	healthTracker := health.New(100)
+
 	rt := router.New(router.Config{
 		DefaultProvider:    cfg.Routing.DefaultProvider,
 		ModelToProvider:    cfg.Routing.ModelToProvider,
@@ -575,6 +578,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		AlertStore:            alertStore,
 		Notifier:              notifier,
 		ProviderRetryPolicies: retryPolicies,
+		Health:                healthTracker,
 
 		AudioTranscriptionProvider: cfg.Audio.TranscriptionProvider,
 		AudioTranscriptionURL:      cfg.Audio.TranscriptionURL,
@@ -601,6 +605,7 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		Budget:          budgetSvc,
 		ProviderCatalog: catalog,
 		ModeToProvider:  cfg.Routing.ModeToProvider,
+		HealthTracker:   healthTracker,
 	})
 
 	protectedAdmin := server.AdminAuth(cfg.Admin.APIKey)(adminMux)
