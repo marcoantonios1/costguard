@@ -12,6 +12,7 @@ Most LLM applications eventually run into:
 - Repeated identical API calls that could be cached
 - No visibility into token usage by team, project, or agent
 - No policy layer between the app and the model provider
+- No automatic fallback when a provider is down or rate-limited
 
 Costguard solves these by sitting between your application and the model providers as a thin, OpenAI-compatible proxy.
 
@@ -24,16 +25,20 @@ Your App (OpenAI SDK / curl)
         │
         ▼
   Costguard Gateway  (:8080)
-  ┌─────────────────────────────┐
-  │  Routing → Budget check     │
-  │  Cache lookup               │
-  │  Provider selection         │
-  │  Streaming / tool call      │
-  │  Metering → DB              │
-  └─────────────────────────────┘
-        │
-        ▼
-  Provider  (OpenAI / Anthropic / Gemini / Local)
+  ┌───────────────────────────────────────┐
+  │  Routing → Budget check               │
+  │  Cache lookup                         │
+  │  Provider selection                   │
+  │  Circuit breaker gate                 │
+  │  Retry with backoff                   │
+  │  Health recording                     │
+  │  Streaming / tool call                │
+  │  Metering → DB                        │
+  └───────────────────────────────────────┘
+        │              │ (fallback)
+        ▼              ▼
+   Primary         Fallback
+   Provider        Provider
 ```
 
 ---
@@ -77,11 +82,86 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 
 ### Multi-Provider Routing
 
-Route requests to OpenAI, Anthropic, Gemini, or any OpenAI-compatible endpoint (Ollama, vLLM, etc.) based on model name, a routing mode hint, or an explicit provider override.
+Route requests to OpenAI, Anthropic, Gemini, or any OpenAI-compatible endpoint (Ollama, vLLM, etc.) based on model name, a routing hint, or an explicit provider override.
 
 ### Fallback
 
 If the primary provider fails, Costguard automatically retries with the configured fallback provider and maps the model name if needed.
+
+### Per-Provider Retry Policy
+
+Configure per-provider retry behaviour with exponential backoff. Retries are attempted automatically before falling back to the secondary provider.
+
+```json
+"retry": {
+  "max_attempts": 3,
+  "retry_on_5xx": true,
+  "retry_on_timeout": true,
+  "initial_backoff": "500ms",
+  "max_backoff": "10s"
+}
+```
+
+- **`max_attempts`** — total attempts including the first (default: 1 = no retry).
+- **`retry_on_5xx`** — retry on `5xx` upstream responses.
+- **`retry_on_timeout`** — retry on network timeouts.
+- **`initial_backoff`** / **`max_backoff`** — exponential backoff with ±10% jitter, capped at `max_backoff`.
+- **429 Retry-After** — honoured automatically; the delay is capped at `max_backoff × 3`.
+
+Each retry attempt is logged with `provider_retry_attempt` and includes the attempt number, reason, and backoff applied. When all attempts are exhausted on a retryable error, `provider_retry_exhausted` is logged and the fallback fires.
+
+### Circuit Breaker
+
+A per-provider three-state circuit breaker (`closed` → `open` → `half-open`) prevents cascading failures by short-circuiting calls to unhealthy providers without waiting for a timeout.
+
+```json
+"breaker": {
+  "failure_threshold": 5,
+  "cooldown_seconds": 30
+}
+```
+
+- **Closed** — all requests pass through. Consecutive relevant failures are counted.
+- **Open** — requests are rejected immediately (no upstream call). Transitions to half-open after `cooldown_seconds`.
+- **Half-open** — one probe request is allowed. Success → closed. Failure → re-opens.
+
+Only `upstream_failure` and `provider_unavailable` errors count toward the threshold. Authentication errors, invalid request errors, and rate limits do **not** trip the breaker — these are caller or quota issues, not provider health signals.
+
+When the breaker opens, Costguard falls through to the fallback provider automatically. State transitions are logged:
+
+| Log event | Meaning |
+|---|---|
+| `circuit_breaker_tripped` | Threshold reached; breaker opened |
+| `circuit_breaker_open` | Request blocked; fallback will fire |
+| `circuit_breaker_closed` | Probe succeeded; breaker closed |
+
+### Provider Health Monitoring
+
+Every upstream call records an outcome (success/failure, latency, error category) in a fixed-size ring buffer (last 100 calls per provider). Live stats are available from the admin health endpoint.
+
+### Error Taxonomy
+
+All upstream errors are normalised to one of five categories, returned in the `error.category` field of every error response:
+
+| Category | Meaning | Typical HTTP status |
+|---|---|---|
+| `auth` | Bad or missing API key | 401, 403 |
+| `invalid_request` | Malformed request | 400, 422 |
+| `rate_limit` | Quota or rate limit exceeded | 429 |
+| `provider_unavailable` | Network error, timeout, or circuit open | 502, 503, 504 |
+| `upstream_failure` | Generic provider-side error | 5xx |
+
+Example error response:
+
+```json
+{
+  "error": {
+    "message": "Incorrect API key provided.",
+    "type": "invalid_api_key",
+    "category": "auth"
+  }
+}
+```
 
 ### Caching
 
@@ -112,9 +192,9 @@ Send image content using the standard OpenAI `image_url` format — Costguard tr
 | Gemini | ✅ | trusts `usageMetadata` |
 | OpenAI-compatible (Ollama, vLLM) | opt-in | — |
 
-Because some providers do not include image tokens in their usage response, Costguard estimates vision tokens client-side and adds them to the recorded prompt token count. This ensures budget enforcement accounts for the true cost of vision requests. The estimate is only applied when the upstream returns zero prompt tokens.
+Because some providers do not include image tokens in their usage response, Costguard estimates vision tokens client-side and adds them to the recorded prompt token count. This ensures budget enforcement accounts for the true cost of vision requests.
 
-OpenAI-compatible providers (Ollama, vLLM) reject image content by default. Set `allow_multimodal: true` on the provider to pass image blocks through:
+OpenAI-compatible providers reject image content by default. Set `allow_multimodal: true` to pass image blocks through:
 
 ```json
 "openai_compatible": {
@@ -262,19 +342,6 @@ curl -X POST http://localhost:8080/v1/chat/completions \
   }'
 ```
 
-### Example: streaming tool call
-
-```bash
-curl -X POST http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "claude-sonnet-4-6",
-    "stream": true,
-    "tools": [{"type": "function", "function": {"name": "get_weather", "description": "Get weather", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}],
-    "messages": [{"role": "user", "content": "What is the weather in Paris?"}]
-  }'
-```
-
 Note: streaming responses are not cached.
 
 ---
@@ -321,8 +388,6 @@ The `detail` field (`"low"`, `"high"`, `"auto"`) is used for OpenAI token estima
 
 **Vision token estimation:**
 
-Costguard estimates image tokens client-side for Anthropic and OpenAI when the upstream response reports zero prompt tokens, ensuring budget enforcement reflects the true cost:
-
 | Provider | Formula |
 |---|---|
 | Anthropic | Resize to 1568×1568 → count 512px tiles → `tiles × 765 + 65` per image |
@@ -334,7 +399,7 @@ Costguard estimates image tokens client-side for Anthropic and OpenAI when the u
 
 ## Agent Integration
 
-Costguard is designed to be an infrastructure layer for Agent OS and automated pipelines.
+Costguard is designed to be an infrastructure layer for agent-based and automated pipelines.
 
 ### Identifying Requests
 
@@ -363,12 +428,12 @@ Configure a monthly USD limit per agent in `config.json`:
 
 When an agent's budget is exceeded, Costguard returns `402 Payment Required` immediately — no upstream call is made.
 
-### Querying Provider Capabilities at Runtime
+### Querying Provider Health at Runtime
 
-Before sending a request, an agent can query the provider catalog to find providers that support tools or streaming:
+Before routing a request, an agent can query live provider health including circuit-breaker state:
 
 ```bash
-curl http://localhost:8080/admin/providers \
+curl http://localhost:8080/admin/providers/health \
   -H "Authorization: Bearer $ADMIN_API_KEY"
 ```
 
@@ -379,27 +444,38 @@ Response:
   "providers": [
     {
       "name": "anthropic_primary",
-      "type": "anthropic",
-      "kind": "cloud",
-      "supports_tools": true,
-      "supports_streaming": true,
-      "supports_vision": true,
-      "priority": 100,
-      "tags": ["reasoning", "premium"],
-      "enabled": true
+      "status": "enabled",
+      "total": 150,
+      "successes": 148,
+      "failures": 2,
+      "success_rate": 0.987,
+      "avg_latency_ms": 843.2,
+      "last_error": "",
+      "breaker_state": "closed",
+      "breaker_consecutive_failures": 0
     },
     {
-      "name": "local_ollama",
-      "type": "openai_compatible",
-      "kind": "local",
-      "supports_tools": false,
-      "supports_streaming": true,
-      "priority": 50,
-      "tags": ["cheap", "private", "local"],
-      "enabled": true
+      "name": "openai_primary",
+      "status": "enabled",
+      "total": 0,
+      "successes": 0,
+      "failures": 0,
+      "success_rate": -1,
+      "avg_latency_ms": -1,
+      "breaker_state": "closed",
+      "breaker_consecutive_failures": 0
     }
   ]
 }
+```
+
+`success_rate` and `avg_latency_ms` are `-1` when no data has been recorded yet.
+
+### Querying Provider Capabilities
+
+```bash
+curl http://localhost:8080/admin/providers \
+  -H "Authorization: Bearer $ADMIN_API_KEY"
 ```
 
 Use `supports_tools: true` to find providers for tool-calling requests, and `supports_streaming: true` for streaming requests.
@@ -432,11 +508,13 @@ Pass the mode name in `X-Costguard-Mode` to influence routing without hard-codin
 
 All admin endpoints require `Authorization: Bearer <ADMIN_API_KEY>`.
 
-### Provider Catalog
+### Provider Catalog & Health
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/admin/providers` | List all providers with capability metadata |
+| `GET` | `/admin/providers/health` | Live health stats and circuit-breaker state per provider |
+| `GET` | `/admin/providers/{name}/models` | List supported models for a named provider |
 | `GET` | `/admin/routing/modes` | List routing mode → provider mappings |
 
 ### Usage & Spend
@@ -459,6 +537,20 @@ All admin endpoints require `Authorization: Bearer <ADMIN_API_KEY>`.
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/admin/reports/monthly/send` | Trigger a monthly cost report email |
+
+### Provider health response fields
+
+| Field | Type | Description |
+|---|---|---|
+| `total` | int | Total calls in the tracking window (last 100) |
+| `successes` | int | Successful calls |
+| `failures` | int | Failed calls |
+| `success_rate` | float | 0.0–1.0; `-1` if no data |
+| `avg_latency_ms` | float | Average latency of successful calls; `-1` if no data |
+| `last_error` | string | Error category of the most recent failure |
+| `breaker_state` | string | `"closed"`, `"open"`, or `"half_open"` |
+| `breaker_consecutive_failures` | int | Current consecutive relevant failure count |
+| `breaker_trip_time` | string | RFC3339 timestamp of the most recent trip; omitted if never tripped |
 
 ### Usage query example
 
@@ -484,16 +576,25 @@ Response:
 
 ## Error Responses
 
-All error responses use the standard OpenAI error envelope regardless of which provider was used:
+All error responses use the standard OpenAI error envelope regardless of which provider was used. A `category` field is always present to classify the error:
 
 ```json
 {
   "error": {
-    "message": "agent monthly budget exceeded",
-    "type": "invalid_request_error"
+    "message": "Incorrect API key provided.",
+    "type": "invalid_api_key",
+    "category": "auth"
   }
 }
 ```
+
+| Category | Meaning | Typical HTTP status |
+|---|---|---|
+| `auth` | Bad or missing API key | 401, 403 |
+| `invalid_request` | Malformed or unsupported request | 400, 422 |
+| `rate_limit` | Quota or rate limit exceeded | 429 |
+| `provider_unavailable` | Network error, timeout, or circuit open | 502, 503, 504 |
+| `upstream_failure` | Generic provider-side error | 5xx |
 
 Common HTTP status codes:
 
@@ -502,7 +603,7 @@ Common HTTP status codes:
 | `400` | Malformed request |
 | `402` | Budget exceeded (global, team, project, or agent) |
 | `429` | Rate limit from upstream provider |
-| `502` | Upstream provider error |
+| `502` | Upstream provider error or all providers unavailable |
 
 ---
 
@@ -551,10 +652,10 @@ Common HTTP status codes:
       }
     },
     "mode_to_provider": {
-      "cheap":   "google_primary",
-      "balanced":"openai_primary",
-      "best":    "anthropic_primary",
-      "private": "local_ollama"
+      "cheap":    "google_primary",
+      "balanced": "openai_primary",
+      "best":     "anthropic_primary",
+      "private":  "local_ollama"
     }
   },
 
@@ -564,6 +665,17 @@ Common HTTP status codes:
         "base_url": "https://api.openai.com",
         "api_key":  "env:OPENAI_API_KEY",
         "timeout":  "60s",
+        "retry": {
+          "max_attempts":    2,
+          "retry_on_5xx":    true,
+          "retry_on_timeout": false,
+          "initial_backoff": "500ms",
+          "max_backoff":     "10s"
+        },
+        "breaker": {
+          "failure_threshold": 5,
+          "cooldown_seconds":  30
+        },
         "metadata": {
           "kind": "cloud",
           "supports_tools":      true,
@@ -577,10 +689,21 @@ Common HTTP status codes:
     },
     "anthropic": {
       "anthropic_primary": {
-        "base_url":           "https://api.anthropic.com",
-        "api_key":            "env:ANTHROPIC_API_KEY",
-        "anthropic_version":  "2023-06-01",
-        "timeout":            "60s",
+        "base_url":          "https://api.anthropic.com",
+        "api_key":           "env:ANTHROPIC_API_KEY",
+        "anthropic_version": "2023-06-01",
+        "timeout":           "60s",
+        "retry": {
+          "max_attempts":    3,
+          "retry_on_5xx":    true,
+          "retry_on_timeout": true,
+          "initial_backoff": "500ms",
+          "max_backoff":     "10s"
+        },
+        "breaker": {
+          "failure_threshold": 3,
+          "cooldown_seconds":  60
+        },
         "metadata": {
           "kind": "cloud",
           "supports_tools":      true,
@@ -610,10 +733,13 @@ Common HTTP status codes:
     },
     "openai_compatible": {
       "local_ollama": {
-        "base_url":        "http://host.docker.internal:11434",
-        "api_key":         "",
-        "timeout":         "60s",
+        "base_url":         "http://host.docker.internal:11434",
+        "api_key":          "",
+        "timeout":          "60s",
         "allow_multimodal": false,
+        "breaker": {
+          "disabled": true
+        },
         "metadata": {
           "kind": "local",
           "supports_tools":      false,
@@ -629,6 +755,33 @@ Common HTTP status codes:
 }
 ```
 
+### Provider fields
+
+| Field | Type | Description |
+|---|---|---|
+| `base_url` | string | Upstream API base URL |
+| `api_key` | string | API key (use `env:VAR_NAME` to read from environment) |
+| `timeout` | duration | Per-request timeout (e.g. `"60s"`) |
+| `allow_multimodal` | bool | OpenAI-compatible only — pass image blocks through (default: `false`) |
+
+### `retry` fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `max_attempts` | int | `1` | Total attempts including the first. `1` = no retry. |
+| `retry_on_5xx` | bool | `false` | Retry on upstream 5xx responses |
+| `retry_on_timeout` | bool | `false` | Retry on network timeouts |
+| `initial_backoff` | duration | `"500ms"` | Backoff before the first retry |
+| `max_backoff` | duration | `"10s"` | Maximum backoff (backoff is capped here) |
+
+### `breaker` fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `failure_threshold` | int | `5` | Consecutive relevant failures before opening |
+| `cooldown_seconds` | int | `30` | Seconds to stay open before allowing a probe |
+| `disabled` | bool | `false` | Disable the breaker entirely for this provider |
+
 ### Provider metadata fields
 
 | Field | Type | Description |
@@ -640,12 +793,7 @@ Common HTTP status codes:
 | `supports_embeddings` | bool | Provider has an embeddings endpoint |
 | `priority` | int | Higher = preferred when multiple providers match |
 | `tags` | string[] | Arbitrary labels for filtering or display |
-
-### OpenAI-compatible provider fields
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `allow_multimodal` | bool | `false` | Pass image content blocks through to the upstream. Off by default because many local models do not support vision; requests containing images return `400` when this is `false`. |
+| `supported_models` | string[] | If set, router only routes listed models to this provider |
 
 ---
 
@@ -677,10 +825,12 @@ costguard/
 ├── cmd/api/                   # entrypoint
 ├── internal/
 │   ├── app/                   # application wiring
+│   ├── breaker/               # per-provider circuit breaker (three-state machine + registry)
 │   ├── budget/                # budget enforcement service
 │   ├── cache/                 # in-memory cache
 │   ├── config/                # config loading
-│   ├── gateway/               # request pipeline (routing, caching, metering, streaming)
+│   ├── gateway/               # request pipeline (routing, breaker, retry, caching, metering, streaming)
+│   ├── health/                # per-provider outcome ring buffer and health snapshots
 │   ├── logging/               # structured logging
 │   ├── providers/             # provider abstractions and catalog
 │   │   ├── anthropic/         # Anthropic adapter (tools + streaming + vision)
@@ -704,14 +854,19 @@ costguard/
 - [x] Multi-provider routing
 - [x] Fallback system
 - [x] Model compatibility mapping
+- [x] Cost-aware and priority-based provider selection
 - [x] Budget enforcement (global, team, project, agent)
 - [x] Reporting system
 - [x] Tool calling (OpenAI, Anthropic, Gemini)
 - [x] Streaming (all providers)
 - [x] Agent integration (X-Costguard-Agent, per-agent budget, usage API)
-- [x] Vision & multimodal (image inputs on all providers, client-side token estimation, budget enforcement)
-- [ ] Smart routing (cost/performance optimization)
+- [x] Vision & multimodal (image inputs on all providers, client-side token estimation)
+- [x] Per-provider retry policy with exponential backoff and 429 Retry-After support
+- [x] Normalized error taxonomy with `category` field on all error responses
+- [x] Per-provider health tracking (ring buffer, live stats in admin health endpoint)
+- [x] Per-provider circuit breaker (closed/open/half-open, breaker state in admin health endpoint)
 - [ ] Semantic caching
+- [ ] Router-level circuit awareness (skip open-breaker providers at selection time)
 
 ---
 
