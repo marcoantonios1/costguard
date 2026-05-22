@@ -131,15 +131,25 @@ func (a *Client) ParseResponseMeta(body []byte) (providers.ResponseMeta, error) 
 	}, nil
 }
 
+// openAITypeRemap normalizes OpenAI-specific type strings that don't match the
+// taxonomy. All other type strings are kept verbatim for API compatibility.
+var openAITypeRemap = map[string]string{
+	"server_error": "upstream_error",
+}
+
 func (a *Client) NormalizeError(statusCode int, body []byte) ([]byte, error) {
 	var parsed providers.ErrorBody
 
 	if err := json.Unmarshal(body, &parsed); err == nil && parsed.Error.Message != "" {
+		if remapped, ok := openAITypeRemap[parsed.Error.Type]; ok {
+			parsed.Error.Type = remapped
+		}
+		parsed.Error.Category = providers.ErrorCategory(parsed.Error.Type, statusCode)
 		return json.Marshal(parsed)
 	}
 
 	parsed.Error.Message = http.StatusText(statusCode)
 	parsed.Error.Type = "upstream_error"
-
+	parsed.Error.Category = providers.ErrorCategory(parsed.Error.Type, statusCode)
 	return json.Marshal(parsed)
 }

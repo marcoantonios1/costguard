@@ -216,11 +216,12 @@ func (a *Client) NormalizeError(statusCode int, body []byte) ([]byte, error) {
 	var parsed providers.ErrorBody
 
 	if err := json.Unmarshal(body, &parsed); err == nil && parsed.Error.Message != "" {
+		parsed.Error.Category = providers.ErrorCategory(parsed.Error.Type, statusCode)
 		return json.Marshal(parsed)
 	}
 
 	parsed.Error.Message = http.StatusText(statusCode)
 	parsed.Error.Type = "upstream_error"
-
+	parsed.Error.Category = providers.ErrorCategory(parsed.Error.Type, statusCode)
 	return json.Marshal(parsed)
 }
