@@ -8,6 +8,7 @@ type Gateway interface {
 	Proxy(r *http.Request) (*http.Response, error)
 	ProxyAudio(r *http.Request) (*http.Response, error)
 	ProxySpeech(r *http.Request) (*http.Response, error)
+	ProxyEmbeddings(r *http.Request) (*http.Response, error)
 }
 
 type Deps struct {

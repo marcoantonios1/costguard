@@ -68,6 +68,11 @@ type Gateway struct {
 	audioTTSProvider           string
 	audioTTSURL                string
 	audioTTSModel              string
+
+	embeddingProvider     string
+	embeddingProviderName string
+	embeddingModel        string
+	embeddingDimensions   int
 }
 
 type Deps struct {
@@ -94,6 +99,11 @@ type Deps struct {
 	AudioTTSProvider           string
 	AudioTTSURL                string
 	AudioTTSModel              string
+
+	EmbeddingProvider     string
+	EmbeddingProviderName string
+	EmbeddingModel        string
+	EmbeddingDimensions   int
 }
 
 type openAIUsageResponse struct {
@@ -146,5 +156,10 @@ func New(d Deps) (*Gateway, error) {
 		audioTTSProvider:           d.AudioTTSProvider,
 		audioTTSURL:                d.AudioTTSURL,
 		audioTTSModel:              d.AudioTTSModel,
+
+		embeddingProvider:     d.EmbeddingProvider,
+		embeddingProviderName: d.EmbeddingProviderName,
+		embeddingModel:        d.EmbeddingModel,
+		embeddingDimensions:   d.EmbeddingDimensions,
 	}, nil
 }

@@ -593,6 +593,8 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		RunOnStartup:  cfg.Reports.RunOnStartup,
 	})
 
+	embeddingProviderName := resolveEmbeddingProviderName(cfg, availableProviders)
+
 	gw, err := gateway.New(gateway.Deps{
 		Router:                rt,
 		Registry:              reg,
@@ -616,6 +618,11 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		AudioTTSProvider:           cfg.Audio.TTSProvider,
 		AudioTTSURL:                cfg.Audio.TTSURL,
 		AudioTTSModel:              cfg.Audio.TTSModel,
+
+		EmbeddingProvider:     cfg.Embedding.Provider,
+		EmbeddingProviderName: embeddingProviderName,
+		EmbeddingModel:        cfg.Embedding.Model,
+		EmbeddingDimensions:   cfg.Embedding.Dimensions,
 	})
 	if err != nil {
 		log.Error("failed_to_create_gateway", map[string]any{"error": err})
@@ -655,6 +662,40 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		server:          srv,
 		reportScheduler: reportScheduler,
 	}, nil
+}
+
+// resolveEmbeddingProviderName picks the registered provider name that best
+// matches the configured embedding family. For "ollama" it scans
+// openai_compatible providers; for "openai" it scans openai providers. The
+// first name that is available (i.e. was successfully registered) is returned.
+func resolveEmbeddingProviderName(cfg config.Config, available map[string]bool) string {
+	switch cfg.Embedding.Provider {
+	case "ollama":
+		for name := range cfg.Providers.OpenAICompatible {
+			if available[name] && strings.Contains(strings.ToLower(name), "ollama") {
+				return name
+			}
+		}
+		// Fall back to any available openai_compatible provider.
+		for name := range cfg.Providers.OpenAICompatible {
+			if available[name] {
+				return name
+			}
+		}
+	case "openai":
+		for name := range cfg.Providers.OpenAI {
+			if available[name] && strings.Contains(strings.ToLower(name), "openai") {
+				return name
+			}
+		}
+		// Fall back to any available openai provider.
+		for name := range cfg.Providers.OpenAI {
+			if available[name] {
+				return name
+			}
+		}
+	}
+	return ""
 }
 
 func (a *App) Run() error {

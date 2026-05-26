@@ -135,7 +135,7 @@
           "supports_tools": true,
           "supports_streaming": true,
           "supports_vision": true,
-          "supports_embeddings": false,
+          "supports_embeddings": true,
           "priority": 95,
           "tags": ["premium", "general"]
         }
@@ -202,7 +202,7 @@
           "supports_tools": true,
           "supports_streaming": true,
           "supports_vision": true,
-          "supports_embeddings": false,
+          "supports_embeddings": true,
           "priority": 50,
           "tags": ["cheap", "private", "local"]
         }
