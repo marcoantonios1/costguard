@@ -76,7 +76,7 @@ func (h *handler) embeddings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstreamResp, err := h.gw.Proxy(r)
+	upstreamResp, err := h.gw.ProxyEmbeddings(r)
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte(err.Error()))
