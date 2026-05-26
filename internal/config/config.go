@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,6 +22,7 @@ type Config struct {
 	Providers ProvidersConfig `json:"providers"`
 	Admin     AdminConfig     `json:"admin"`
 	Audio     AudioConfig
+	Embedding EmbeddingConfig
 	Pricing   PricingConfig `json:"pricing"`
 }
 
@@ -33,6 +35,22 @@ type PriceEntry struct {
 
 // PricingConfig maps provider → model → price, mirroring the JSON structure.
 type PricingConfig map[string]map[string]PriceEntry
+
+// EmbeddingConfig holds routing configuration for the /v1/embeddings endpoint.
+// Values are read from environment variables at startup.
+type EmbeddingConfig struct {
+	// Provider selects the upstream for POST /v1/embeddings.
+	// Valid values: "ollama" (default) or "openai".
+	Provider string
+
+	// Model is the model name passed to the upstream provider.
+	// When empty, the client-supplied model is used.
+	Model string
+
+	// Dimensions is the expected output vector length.
+	// Used for optional validation; 0 = no validation.
+	Dimensions int
+}
 
 // AudioConfig holds routing configuration for audio endpoints.
 // Values are read from environment variables at startup.
@@ -498,6 +516,11 @@ func Load(path string) (Config, error) {
 		return c, err
 	}
 
+	c.Embedding = loadEmbeddingConfig()
+	if err := validateEmbeddingConfig(c.Embedding); err != nil {
+		return c, err
+	}
+
 	return c, nil
 }
 
@@ -544,6 +567,31 @@ func ValidateAudioConfig(cfg AudioConfig) error {
 		return errors.New("AUDIO_TTS_URL is required when AUDIO_TTS_PROVIDER=local")
 	}
 
+	return nil
+}
+
+// loadEmbeddingConfig reads embedding provider settings from environment variables.
+// Defaults to "ollama" when the env var is unset.
+func loadEmbeddingConfig() EmbeddingConfig {
+	provider := strings.TrimSpace(os.Getenv("EMBEDDING_PROVIDER"))
+	if provider == "" {
+		provider = "ollama"
+	}
+	dims, _ := strconv.Atoi(strings.TrimSpace(os.Getenv("EMBEDDING_DIMENSIONS")))
+	return EmbeddingConfig{
+		Provider:   provider,
+		Model:      strings.TrimSpace(os.Getenv("EMBEDDING_MODEL")),
+		Dimensions: dims,
+	}
+}
+
+// validateEmbeddingConfig rejects provider values other than "ollama" or "openai".
+func validateEmbeddingConfig(cfg EmbeddingConfig) error {
+	switch cfg.Provider {
+	case "ollama", "openai":
+	default:
+		return fmt.Errorf("EMBEDDING_PROVIDER: unsupported value %q (valid values: ollama, openai)", cfg.Provider)
+	}
 	return nil
 }
 
