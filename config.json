@@ -195,7 +195,7 @@
       "local_ollama": {
         "base_url": "http://host.docker.internal:11434",
         "api_key": "",
-        "timeout": "60s",
+        "timeout": "600s",
         "allow_multimodal": true,
         "metadata": {
           "kind": "local",
