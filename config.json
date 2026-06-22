@@ -45,7 +45,10 @@
       "gemini-2.5-flash": "google_primary",
       "gemma4:26b": "local_ollama",
       "medgemma:27b": "local_ollama",
-      "llama3.2:3b": "local_ollama"
+      "llama3.2:3b": "local_ollama",
+      "nomic-embed-text": "local_ollama",
+      "qwen3:8b": "local_ollama",
+      "qwen3-coder:30b": "local_ollama"
     },
     "model_compatibility": {
       "gpt-4o-mini": {
@@ -70,6 +73,14 @@
       "llama3.2:3b": {
         "openai_primary": "gpt-4o-mini",
         "google_primary": "gemini-2.5-flash"
+      },
+      "qwen3:8b": {
+        "openai_primary": "gpt-4o-mini",
+        "google_primary": "gemini-2.5-flash"
+      },
+      "qwen3-coder:30b": {
+        "openai_primary": "gpt-4o-mini",
+        "anthropic_primary": "claude-sonnet-4-6"
       }
     },
     "mode_to_provider": {
@@ -99,7 +110,9 @@
       "claude-haiku-4-5":  { "input_per_1m": 1.00, "output_per_1m":  5.00 },
       "claude-sonnet-4-5": { "input_per_1m": 3.00, "output_per_1m": 15.00 },
       "claude-sonnet-4-6": { "input_per_1m": 3.00, "output_per_1m": 15.00 },
-      "claude-opus-4-6":   { "input_per_1m": 5.00, "output_per_1m": 25.00 }
+      "claude-opus-4-6":   { "input_per_1m": 5.00, "output_per_1m": 25.00 },
+      "claude-mythos-5":   { "input_per_1m": 10.00, "output_per_1m": 50.00 },
+      "claude-fable-5":   { "input_per_1m": 10.00, "output_per_1m": 50.00 }
     },
     "google": {
       "gemini-2.5-flash-lite": { "input_per_1m": 0.10, "output_per_1m":  0.40 },
@@ -167,6 +180,8 @@
           "priority": 100,
           "tags": ["reasoning", "premium"],
           "supported_models": [
+            "claude-mythos-5",
+            "claude-fable-5",
             "claude-opus-4-6",
             "claude-sonnet-4-6",
             "claude-sonnet-4-5",
@@ -204,7 +219,15 @@
           "supports_vision": true,
           "supports_embeddings": true,
           "priority": 50,
-          "tags": ["cheap", "private", "local"]
+          "tags": ["cheap", "private", "local"],
+          "supported_models": [
+            "gemma4:26b",
+            "medgemma:27b",
+            "llama3.2:3b",
+            "nomic-embed-text",
+            "qwen3:8b",
+            "qwen3-coder:30b"
+          ]
         }
       },
       "local_vllm": {
