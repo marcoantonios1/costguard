@@ -8,6 +8,12 @@ import (
 	"sync"
 )
 
+// maxLineBufSize caps how many bytes a single unterminated SSE line may
+// accumulate in lineBuf. If a line exceeds this (e.g. a mislabeled non-SSE
+// body or a pathologically long line), the buffered bytes are dropped and
+// the line is skipped for metering. Data passthrough via Read is unaffected.
+const maxLineBufSize = 1 << 20 // 1 MB
+
 // StreamMeter wraps a streaming SSE response body. As data passes through
 // Read it inspects each line for model, usage, and content delta fields
 // without allocating an extra copy for the caller. When the stream ends —
@@ -24,10 +30,11 @@ import (
 //       prompt = promptEstimate + visionEstimate (unconditional).
 //     - Sets estimated=true in the onDone callback.
 type StreamMeter struct {
-	src             io.ReadCloser
-	lineBuf         []byte
-	promptEstimate  int
-	visionEstimate  int
+	src            io.ReadCloser
+	lineBuf        []byte
+	lineOverflowed bool // true while draining an oversized line past the cap
+	promptEstimate int
+	visionEstimate int
 
 	mu                 sync.Mutex
 	model              string
@@ -109,11 +116,28 @@ func (sm *StreamMeter) inspect(data []byte) {
 	for {
 		idx := bytes.IndexByte(sm.lineBuf, '\n')
 		if idx < 0 {
+			// No newline yet. If the unterminated line exceeds the cap, drop
+			// the buffered bytes and mark it as overflowed so it is skipped
+			// once the eventual newline arrives. This bounds memory regardless
+			// of how long the line ultimately grows.
+			if len(sm.lineBuf) > maxLineBufSize {
+				sm.lineBuf = sm.lineBuf[:0]
+				sm.lineOverflowed = true
+			}
 			break
 		}
-		line := strings.TrimRight(string(sm.lineBuf[:idx]), "\r")
+
+		line := sm.lineBuf[:idx]
 		sm.lineBuf = sm.lineBuf[idx+1:]
-		sm.processLine(line)
+
+		if sm.lineOverflowed {
+			// This newline terminates the line we gave up on; skip it and
+			// resume normal buffering for whatever follows.
+			sm.lineOverflowed = false
+			continue
+		}
+
+		sm.processLine(strings.TrimRight(string(line), "\r"))
 	}
 }
 
