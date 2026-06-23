@@ -38,7 +38,13 @@ func newJSONErrorResponseCategorized(r *http.Request, status int, message, errTy
 }
 
 func newJSONErrorResponse(r *http.Request, status int, message string) *http.Response {
-	body := fmt.Sprintf(`{"error":{"message":"%s"}}`, message)
+	var out providers.ErrorBody
+	out.Error.Message = message
+
+	body, err := json.Marshal(out)
+	if err != nil {
+		body = []byte(`{"error":{"message":"internal error"}}`)
+	}
 
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
@@ -47,7 +53,7 @@ func newJSONErrorResponse(r *http.Request, status int, message string) *http.Res
 		StatusCode: status,
 		Status:     fmt.Sprintf("%d %s", status, http.StatusText(status)),
 		Header:     header,
-		Body:       io.NopCloser(bytes.NewReader([]byte(body))),
+		Body:       io.NopCloser(bytes.NewReader(body)),
 		Request:    r,
 	}
 }
