@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/marcoantonios1/costguard/internal/cache"
@@ -64,7 +65,11 @@ func cloneHeader(h http.Header) map[string][]string {
 	for k, vv := range h {
 		switch http.CanonicalHeaderKey(k) {
 		case "Content-Type",
-			"Content-Length",
+			// Content-Length is intentionally excluded here; responseFromCacheEntry
+			// recomputes it from the stored body length so a stale value from the
+			// original encoded response can never mismatch the replayed body.
+			// Content-Encoding is intentionally excluded; cached bodies are always
+			// stored decoded, so replaying a Content-Encoding header would be wrong.
 			"Openai-Organization",
 			"Openai-Processing-Ms",
 			"Openai-Project",
@@ -81,6 +86,7 @@ func responseFromCacheEntry(r *http.Request, entry cache.Entry) *http.Response {
 	for k, vv := range entry.Header {
 		header[k] = append([]string(nil), vv...)
 	}
+	header.Set("Content-Length", strconv.Itoa(len(entry.Body)))
 
 	return &http.Response{
 		StatusCode: entry.StatusCode,

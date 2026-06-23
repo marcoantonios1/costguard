@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/marcoantonios1/costguard/internal/cache"
 	"github.com/marcoantonios1/costguard/internal/providers"
 )
 
@@ -85,5 +88,41 @@ func TestNewJSONErrorResponse_ValidJSON(t *testing.T) {
 				t.Error("injected_key must not appear in the error object")
 			}
 		})
+	}
+}
+
+func TestResponseFromCacheEntry_ContentLengthMatchesBody(t *testing.T) {
+	body := []byte(`{"id":"x","object":"chat.completion","choices":[]}`)
+
+	entry := cache.Entry{
+		StatusCode: http.StatusOK,
+		Header: map[string][]string{
+			"Content-Type": {"application/json"},
+			// Intentionally wrong length to confirm it gets recomputed.
+			"Content-Length": {"9999"},
+		},
+		Body:      body,
+		ExpiresAt: time.Now().Add(time.Minute),
+	}
+
+	resp := responseFromCacheEntry(nil, entry)
+	defer resp.Body.Close()
+
+	got := resp.Header.Get("Content-Length")
+	want := strconv.Itoa(len(body))
+	if got != want {
+		t.Errorf("Content-Length: got %q, want %q", got, want)
+	}
+
+	if resp.Header.Get("Content-Encoding") != "" {
+		t.Errorf("Content-Encoding must be absent, got %q", resp.Header.Get("Content-Encoding"))
+	}
+
+	replayed, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("reading body: %v", err)
+	}
+	if string(replayed) != string(body) {
+		t.Errorf("body mismatch\ngot:  %q\nwant: %q", replayed, body)
 	}
 }
