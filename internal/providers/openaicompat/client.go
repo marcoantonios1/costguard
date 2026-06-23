@@ -95,14 +95,9 @@ func (a *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 		return nil, err
 	}
 
-	upstreamReq.Header = make(http.Header, len(req.Header))
-	for k, vv := range req.Header {
-		for _, v := range vv {
-			upstreamReq.Header.Add(k, v)
-		}
-	}
-
-	if upstreamReq.Header.Get("Authorization") == "" && strings.TrimSpace(a.apiKey) != "" {
+	upstreamReq.Header = make(http.Header)
+	upstreamReq.Header.Set("Content-Type", "application/json")
+	if strings.TrimSpace(a.apiKey) != "" {
 		upstreamReq.Header.Set("Authorization", "Bearer "+a.apiKey)
 	}
 
