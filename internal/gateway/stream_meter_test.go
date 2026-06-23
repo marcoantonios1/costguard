@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"strings"
@@ -340,5 +341,118 @@ func TestStreamMeterVisionEstimate_RealUsageNonZeroPrompt(t *testing.T) {
 	}
 	if gotTotal != 15 {
 		t.Errorf("total: got %d, want 15", gotTotal)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// lineBuf cap
+// ---------------------------------------------------------------------------
+
+// drainChunked reads sm in fixed-size chunks and returns all bytes, tracking
+// the maximum observed lineBuf length between reads.
+func drainChunked(sm *StreamMeter, chunkSize int) (out []byte, maxLineBuf int) {
+	buf := make([]byte, chunkSize)
+	for {
+		n, err := sm.Read(buf)
+		out = append(out, buf[:n]...)
+		if l := len(sm.lineBuf); l > maxLineBuf {
+			maxLineBuf = l
+		}
+		if err != nil {
+			break
+		}
+	}
+	return out, maxLineBuf
+}
+
+// TestStreamMeterOversizedLine_BufferCapped verifies that a single line longer
+// than maxLineBufSize does not cause unbounded memory growth, that all bytes
+// still reach the caller unchanged, and that a valid SSE line following the
+// oversized one is still processed correctly (overflow recovery).
+func TestStreamMeterOversizedLine_BufferCapped(t *testing.T) {
+	filler := strings.Repeat("x", 2*1024*1024) // 2 MB, no newline
+	validSSE := sseChunk(finishLine) + "data: [DONE]\n\n"
+	bodyStr := filler + "\n" + validSSE
+	body := []byte(bodyStr)
+
+	var gotTotal int
+	sm := newStreamMeter(sseBody(bodyStr), "gpt-4o", 0, 0, func(_ string, _, _, tt int, _ bool) {
+		gotTotal = tt
+	})
+
+	out, maxObserved := drainChunked(sm, 4096)
+
+	// (a) passthrough: every byte reaches the caller unchanged.
+	if !bytes.Equal(out, body) {
+		t.Errorf("passthrough mismatch: got %d bytes, want %d", len(out), len(body))
+	}
+	// (b) the valid SSE line after the oversized one is processed correctly.
+	if gotTotal != 15 {
+		t.Errorf("total tokens after overflow recovery: got %d, want 15", gotTotal)
+	}
+	// (c) lineBuf never exceeded the cap between reads.
+	if maxObserved > maxLineBufSize {
+		t.Errorf("lineBuf grew to %d bytes, exceeding cap of %d", maxObserved, maxLineBufSize)
+	}
+}
+
+// TestStreamMeterMislabeledNonSSEBody verifies that a large body with no SSE
+// lines (e.g. a mislabeled non-SSE response) passes through unchanged, fires
+// onDone exactly once via the fallback-estimation path, and keeps lineBuf
+// within the cap throughout.
+func TestStreamMeterMislabeledNonSSEBody(t *testing.T) {
+	bodyStr := strings.Repeat("z", 5*1024*1024) // 5 MB, no newlines, no SSE
+	body := []byte(bodyStr)
+
+	var doneCount int32
+	var gotEstimated bool
+	sm := newStreamMeter(sseBody(bodyStr), "m", 0, 0, func(_ string, _, _, _ int, est bool) {
+		atomic.AddInt32(&doneCount, 1)
+		gotEstimated = est
+	})
+
+	out, maxObserved := drainChunked(sm, 4096)
+
+	// (a) passthrough unaffected.
+	if !bytes.Equal(out, body) {
+		t.Errorf("passthrough mismatch: got %d bytes, want %d", len(out), len(body))
+	}
+	// (b) onDone fires exactly once via the fallback-estimation path.
+	if n := atomic.LoadInt32(&doneCount); n != 1 {
+		t.Errorf("onDone called %d times, want 1", n)
+	}
+	if !gotEstimated {
+		t.Error("expected estimated=true for non-SSE body (no usage chunk)")
+	}
+	// (c) lineBuf bounded throughout.
+	if maxObserved > maxLineBufSize {
+		t.Errorf("lineBuf grew to %d bytes, exceeding cap of %d", maxObserved, maxLineBufSize)
+	}
+}
+
+// TestStreamMeterOverflowRecovery_MultipleConsecutiveLongLines asserts that
+// two back-to-back oversized lines each cause a clean overflow-and-skip, and
+// that the valid SSE line following both is still processed.
+func TestStreamMeterOverflowRecovery_MultipleConsecutiveLongLines(t *testing.T) {
+	filler := strings.Repeat("y", 2*1024*1024)
+	validSSE := sseChunk(finishLine) + "data: [DONE]\n\n"
+	bodyStr := filler + "\n" + filler + "\n" + validSSE
+	body := []byte(bodyStr)
+
+	var gotTotal int
+	sm := newStreamMeter(sseBody(bodyStr), "gpt-4o", 0, 0, func(_ string, _, _, tt int, _ bool) {
+		gotTotal = tt
+	})
+
+	out, maxObserved := drainChunked(sm, 4096)
+
+	if !bytes.Equal(out, body) {
+		t.Errorf("passthrough mismatch: got %d bytes, want %d", len(out), len(body))
+	}
+	if gotTotal != 15 {
+		t.Errorf("total tokens after two oversized lines: got %d, want 15", gotTotal)
+	}
+	if maxObserved > maxLineBufSize {
+		t.Errorf("lineBuf grew to %d bytes, exceeding cap of %d", maxObserved, maxLineBufSize)
 	}
 }
