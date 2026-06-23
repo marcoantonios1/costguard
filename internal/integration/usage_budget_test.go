@@ -505,3 +505,140 @@ func TestBudget_Rejection_Returns402(t *testing.T) {
 		t.Error("402 error.message must not be empty")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Budget-before-cache tests
+// ---------------------------------------------------------------------------
+
+// stubAlertStore counts MarkSent calls so tests can assert whether the
+// alert-once path fired.
+type stubAlertStore struct {
+	mu        sync.Mutex
+	markCalls int
+}
+
+func (s *stubAlertStore) WasSent(_ context.Context, _ time.Time, _ int, _ string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.markCalls > 0, nil
+}
+
+func (s *stubAlertStore) MarkSent(_ context.Context, _ time.Time, _ int, _ string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.markCalls++
+	return nil
+}
+
+func (s *stubAlertStore) called() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.markCalls
+}
+
+// newHarnessWithBudgetAndCache wires a gateway with both budget enforcement
+// and an active cache (capacity 1000, TTL 1 minute).
+func newHarnessWithBudgetAndCache(reg *providers.Registry, monthlyUSD float64, alerts *stubAlertStore) (*httptest.Server, *accumulatingStore) {
+	store := &accumulatingStore{}
+	budgetSvc := budget.NewService(store, budget.Config{
+		Enabled:    true,
+		MonthlyUSD: monthlyUSD,
+	})
+
+	gw, err := gateway.New(gateway.Deps{
+		Router:        &staticRouter{},
+		Registry:      reg,
+		Cache:         cache.NewMemory(1000),
+		CacheTTL:      time.Minute,
+		UsageStore:    store,
+		BudgetChecker: budgetSvc,
+		AlertStore:    alerts,
+	})
+	if err != nil {
+		panic("gateway.New: " + err.Error())
+	}
+
+	mux := http.NewServeMux()
+	openai_http.Register(mux, openai_http.Deps{Gateway: gw})
+	return httptest.NewServer(mux), store
+}
+
+// TestBudget_BlocksEvenOnCacheHit verifies that a budget-exceeded team gets
+// 402 on what would otherwise be a cache hit — no cached body is served once
+// the budget is exhausted.
+func TestBudget_BlocksEvenOnCacheHit(t *testing.T) {
+	upstream, _ := captureUpstream(t, "/v1/messages", anthropicZeroUsageResponse())
+	defer upstream.Close()
+
+	client, _ := anthropic_provider.NewClient(anthropic_provider.ClientConfig{
+		Name: "anthropic-cache-bgt", BaseURL: upstream.URL,
+		APIKey: "test-key", AnthropicVersion: "2023-06-01",
+	})
+	reg := providers.NewRegistry()
+	reg.Register("anthropic-cache-bgt", client)
+
+	alerts := &stubAlertStore{}
+	srv, store := newHarnessWithBudgetAndCache(reg, 0.000001, alerts)
+	defer srv.Close()
+
+	payload := imageOnlyPayload("claude-sonnet-4-5-20250929", "https://example.com/photo.png")
+
+	// First request: populates the cache and exhausts the budget.
+	status1, body1 := postToServer(t, srv, "anthropic-cache-bgt", payload)
+	if status1 != http.StatusOK {
+		t.Fatalf("first request: expected 200, got %d: %s", status1, body1)
+	}
+	if store.totalCost() <= 0 {
+		t.Fatal("expected non-zero cost after first vision request")
+	}
+
+	// Second request: budget exceeded — must get 402 even though the cache
+	// holds a response for this exact key.
+	status2, body2 := postToServer(t, srv, "anthropic-cache-bgt", payload)
+	if status2 != http.StatusPaymentRequired {
+		t.Errorf("second request (would-be cache hit): expected 402, got %d\nbody: %s", status2, body2)
+	}
+}
+
+// TestBudget_AlertFiresOnWouldBeCacheHit verifies that the monthly-budget
+// alert path fires even when the request would have been served from cache,
+// confirming that alert emission is not short-circuited by the cache lookup.
+func TestBudget_AlertFiresOnWouldBeCacheHit(t *testing.T) {
+	upstream, _ := captureUpstream(t, "/v1/messages", anthropicZeroUsageResponse())
+	defer upstream.Close()
+
+	client, _ := anthropic_provider.NewClient(anthropic_provider.ClientConfig{
+		Name: "anthropic-alert-bgt", BaseURL: upstream.URL,
+		APIKey: "test-key", AnthropicVersion: "2023-06-01",
+	})
+	reg := providers.NewRegistry()
+	reg.Register("anthropic-alert-bgt", client)
+
+	alerts := &stubAlertStore{}
+	srv, store := newHarnessWithBudgetAndCache(reg, 0.000001, alerts)
+	defer srv.Close()
+
+	payload := imageOnlyPayload("claude-sonnet-4-5-20250929", "https://example.com/photo.png")
+
+	// First request: populates cache, exhausts budget, triggers alert.
+	status1, _ := postToServer(t, srv, "anthropic-alert-bgt", payload)
+	if status1 != http.StatusOK {
+		t.Fatalf("first request: expected 200, got %d", status1)
+	}
+	if store.totalCost() <= 0 {
+		t.Fatal("expected non-zero cost after first vision request")
+	}
+
+	alertsBefore := alerts.called()
+
+	// Second request: would be a cache hit, but budget is exceeded.
+	// The alert-once path must fire (MarkSent called again or WasSent seen).
+	status2, _ := postToServer(t, srv, "anthropic-alert-bgt", payload)
+	if status2 != http.StatusPaymentRequired {
+		t.Fatalf("second request: expected 402, got %d", status2)
+	}
+
+	if alerts.called() <= alertsBefore {
+		t.Error("alert MarkSent was not called on the would-be cache-hit request — budget alert is being skipped")
+	}
+}
