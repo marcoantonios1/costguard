@@ -1,6 +1,8 @@
 package openaicompat
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -501,4 +503,143 @@ func TestGuard_ToolsGuardSkippedOnNonChatPath(t *testing.T) {
 		t.Errorf("status: got %d, want 200", resp.StatusCode)
 	}
 	_ = received
+}
+
+// ---------------------------------------------------------------------------
+// Header whitelisting
+// ---------------------------------------------------------------------------
+
+// headerCapturingServer returns a test server that records the headers of every
+// inbound request and responds with minimalOKResponse.
+func headerCapturingServer(t *testing.T, captured *http.Header) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*captured = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(minimalOKResponse))
+	}))
+}
+
+func compatClientWithKey(t *testing.T, srvURL, apiKey string) *Client {
+	t.Helper()
+	c, err := NewClient(ClientConfig{
+		Name:            "test",
+		BaseURL:         srvURL,
+		APIKey:          apiKey,
+		AllowMultimodal: true,
+		SupportTools:    true,
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	return c
+}
+
+func TestDo_InboundAuthorizationNotForwarded(t *testing.T) {
+	var captured http.Header
+	srv := headerCapturingServer(t, &captured)
+	defer srv.Close()
+
+	client := compatClientWithKey(t, srv.URL, "configured-provider-key")
+
+	req := compatRequest(t, srv.URL, noToolsPayload)
+	req.Header.Set("Authorization", "Bearer client-side-token")
+
+	resp, err := client.Do(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	got := captured.Get("Authorization")
+	if got != "Bearer configured-provider-key" {
+		t.Errorf("Authorization: got %q, want %q", got, "Bearer configured-provider-key")
+	}
+}
+
+func TestDo_CostguardHeadersNotForwarded(t *testing.T) {
+	var captured http.Header
+	srv := headerCapturingServer(t, &captured)
+	defer srv.Close()
+
+	client := compatClientWithKey(t, srv.URL, "")
+
+	req := compatRequest(t, srv.URL, noToolsPayload)
+	req.Header.Set("X-Costguard-Team", "team-a")
+	req.Header.Set("X-Costguard-Project", "proj-b")
+	req.Header.Set("X-Costguard-User", "user-c")
+	req.Header.Set("X-Costguard-Agent", "agent-d")
+	req.Header.Set("X-Request-Id", "req-123")
+
+	resp, err := client.Do(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	for _, h := range []string{"X-Costguard-Team", "X-Costguard-Project", "X-Costguard-User", "X-Costguard-Agent", "X-Request-Id"} {
+		if v := captured.Get(h); v != "" {
+			t.Errorf("header %q must not reach upstream, got %q", h, v)
+		}
+	}
+}
+
+func TestDo_AcceptEncodingNotForwarded(t *testing.T) {
+	var captured http.Header
+	srv := headerCapturingServer(t, &captured)
+	defer srv.Close()
+
+	client := compatClientWithKey(t, srv.URL, "")
+
+	req := compatRequest(t, srv.URL, noToolsPayload)
+	req.Header.Set("Accept-Encoding", "deflate")
+
+	resp, err := client.Do(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if v := captured.Get("Accept-Encoding"); strings.Contains(v, "deflate") {
+		t.Errorf("client Accept-Encoding must not reach upstream, got %q", v)
+	}
+}
+
+func TestDo_GzippedUpstreamBody_MeteredCorrectly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		_, _ = gz.Write([]byte(minimalOKResponse))
+		_ = gz.Close()
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		_, _ = w.Write(buf.Bytes())
+	}))
+	defer srv.Close()
+
+	client := compatClientWithKey(t, srv.URL, "")
+
+	resp, err := client.Do(context.Background(), compatRequest(t, srv.URL, noToolsPayload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("reading body: %v", err)
+	}
+
+	// Body must be plain JSON, not raw gzip bytes.
+	meta, err := new(Client).ParseResponseMeta(body)
+	if err != nil {
+		t.Fatalf("ParseResponseMeta failed (body likely still gzip): %v\nbody: %q", err, body)
+	}
+	if meta.TotalTokens != 7 {
+		t.Errorf("TotalTokens: got %d, want 7", meta.TotalTokens)
+	}
+	if resp.Header.Get("Content-Encoding") != "" {
+		t.Errorf("Content-Encoding should be empty after transparent decompression, got %q", resp.Header.Get("Content-Encoding"))
+	}
 }
