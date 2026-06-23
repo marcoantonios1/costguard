@@ -426,7 +426,7 @@ Configure a monthly USD limit per agent in `config.json`:
 }
 ```
 
-When an agent's budget is exceeded, Costguard returns `402 Payment Required` immediately — no upstream call is made.
+When an agent's budget is exceeded, Costguard returns `402 Payment Required` immediately — no upstream call is made, and no cached response is served either.
 
 ### Querying Provider Health at Runtime
 

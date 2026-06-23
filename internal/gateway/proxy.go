@@ -176,50 +176,6 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 		})
 	}
 
-		cacheable := g.isCacheableRequest(r, effectiveBodyBytes)
-	cacheKey := ""
-
-	if cacheable && g.cache != nil && g.cacheTTL > 0 {
-		cacheKey = buildCacheKey(r, effectiveBodyBytes, requestedProviderHint(r), hintedMode, providerName, effectiveModel)
-
-		if entry, ok := g.cache.Get(cacheKey); ok {
-			if g.log != nil {
-				g.log.Info("cache_hit", map[string]any{
-					"request_id": server.RequestIDFromContext(r.Context()),
-					"key":        shortKey(cacheKey),
-					"path":       r.URL.Path,
-					"model":      effectiveModel,
-				})
-			}
-
-			g.meterResponse(r, effectiveBodyBytes, providerName, effectiveModel, entry.Body, true, http.StatusOK)
-
-			if g.log != nil {
-				g.log.Info("routing_result", map[string]any{
-					"request_id":         server.RequestIDFromContext(r.Context()),
-					"requested_model":    model,
-					"requested_provider": requestedProvider,
-					"requested_mode":     hintedMode,
-					"final_provider":     providerName,
-					"final_model":        effectiveModel,
-					"cache_hit":          true,
-					"path":               r.URL.Path,
-				})
-			}
-
-			return responseFromCacheEntry(r, entry), nil
-		}
-
-		if g.log != nil {
-			g.log.Info("cache_miss", map[string]any{
-				"request_id": server.RequestIDFromContext(r.Context()),
-				"key":        shortKey(cacheKey),
-				"path":       r.URL.Path,
-				"model":      effectiveModel,
-			})
-		}
-	}
-
 	if g.budgetChecker != nil {
 		now := time.Now()
 		team := r.Header.Get("X-Costguard-Team")
@@ -303,6 +259,50 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 			}
 
 			return nil, err
+		}
+	}
+
+	cacheable := g.isCacheableRequest(r, effectiveBodyBytes)
+	cacheKey := ""
+
+	if cacheable && g.cache != nil && g.cacheTTL > 0 {
+		cacheKey = buildCacheKey(r, effectiveBodyBytes, requestedProviderHint(r), hintedMode, providerName, effectiveModel)
+
+		if entry, ok := g.cache.Get(cacheKey); ok {
+			if g.log != nil {
+				g.log.Info("cache_hit", map[string]any{
+					"request_id": server.RequestIDFromContext(r.Context()),
+					"key":        shortKey(cacheKey),
+					"path":       r.URL.Path,
+					"model":      effectiveModel,
+				})
+			}
+
+			g.meterResponse(r, effectiveBodyBytes, providerName, effectiveModel, entry.Body, true, http.StatusOK)
+
+			if g.log != nil {
+				g.log.Info("routing_result", map[string]any{
+					"request_id":         server.RequestIDFromContext(r.Context()),
+					"requested_model":    model,
+					"requested_provider": requestedProvider,
+					"requested_mode":     hintedMode,
+					"final_provider":     providerName,
+					"final_model":        effectiveModel,
+					"cache_hit":          true,
+					"path":               r.URL.Path,
+				})
+			}
+
+			return responseFromCacheEntry(r, entry), nil
+		}
+
+		if g.log != nil {
+			g.log.Info("cache_miss", map[string]any{
+				"request_id": server.RequestIDFromContext(r.Context()),
+				"key":        shortKey(cacheKey),
+				"path":       r.URL.Path,
+				"model":      effectiveModel,
+			})
 		}
 	}
 
