@@ -31,8 +31,19 @@ func (g *Gateway) passthroughStreaming(r *http.Request, resp *http.Response, pro
 		visionEstimate = estimateVisionTokens(p, reqBodyBytes)
 	}
 
+	// Snapshot everything meterStreamingUsage needs from the request now,
+	// while r is still guaranteed valid. The metering goroutine may run after
+	// ServeHTTP returns, so it must not touch r.
+	ctx := context.WithoutCancel(r.Context())
+	requestID := server.RequestIDFromContext(r.Context())
+	team := r.Header.Get("X-Costguard-Team")
+	project := r.Header.Get("X-Costguard-Project")
+	user := r.Header.Get("X-Costguard-User")
+	agent := r.Header.Get("X-Costguard-Agent")
+	path := r.URL.Path
+
 	meter := newStreamMeter(resp.Body, model, promptEstimate, visionEstimate, func(finalModel string, prompt, completion, total int, estimated bool) {
-		go g.meterStreamingUsage(r, providerName, finalModel, prompt, completion, total, estimated)
+		go g.meterStreamingUsage(ctx, requestID, providerName, team, project, user, agent, path, finalModel, prompt, completion, total, estimated)
 	})
 
 	return &http.Response{
@@ -44,17 +55,14 @@ func (g *Gateway) passthroughStreaming(r *http.Request, resp *http.Response, pro
 	}
 }
 
-func (g *Gateway) meterStreamingUsage(r *http.Request, providerName, model string, promptTokens, completionTokens, totalTokens int, estimated bool) {
-	// Use a detached context so metering completes even after the HTTP
-	// response is fully sent and the request context is cancelled.
-	ctx := context.WithoutCancel(r.Context())
-
-	requestID := server.RequestIDFromContext(r.Context())
-	team := r.Header.Get("X-Costguard-Team")
-	project := r.Header.Get("X-Costguard-Project")
-	user := r.Header.Get("X-Costguard-User")
-	agent := r.Header.Get("X-Costguard-Agent")
-
+func (g *Gateway) meterStreamingUsage(
+	ctx context.Context,
+	requestID, providerName string,
+	team, project, user, agent, path string,
+	model string,
+	promptTokens, completionTokens, totalTokens int,
+	estimated bool,
+) {
 	usageData := metering.Usage{
 		Provider:         providerName,
 		Model:            model,
@@ -107,7 +115,7 @@ func (g *Gateway) meterStreamingUsage(r *http.Request, providerName, model strin
 			Project:           project,
 			User:              user,
 			Agent:             agent,
-			Path:              r.URL.Path,
+			Path:              path,
 			StatusCode:        http.StatusOK,
 		}
 		if err := g.usageStore.Save(ctx, record); err != nil && g.log != nil {
