@@ -3,8 +3,10 @@ package gateway
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -270,5 +272,108 @@ func TestExponentialBackoff(t *testing.T) {
 		if d < 0 {
 			t.Errorf("attempt %d: negative backoff %v", attempt, d)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Body-drain tests
+// ---------------------------------------------------------------------------
+
+type trackingBody struct {
+	io.Reader
+	closed bool
+}
+
+func (tb *trackingBody) Close() error {
+	tb.closed = true
+	return nil
+}
+
+func resp429WithBody(retryAfter string, body io.ReadCloser) *http.Response {
+	h := make(http.Header)
+	if retryAfter != "" {
+		h.Set("Retry-After", retryAfter)
+	}
+	return &http.Response{StatusCode: http.StatusTooManyRequests, Header: h, Body: body}
+}
+
+// TestCallWithRetry_429BodyClosedOnRetry asserts that the body of a retried
+// 429 response is drained and closed before the next attempt.
+func TestCallWithRetry_429BodyClosedOnRetry(t *testing.T) {
+	tb := &trackingBody{Reader: strings.NewReader("rate limited")}
+	doCall := makeResponses([]callPair{
+		{resp429WithBody("0", tb), nil},
+		{resp200(), nil},
+	})
+	policy := RetryPolicy{
+		MaxAttempts:    2,
+		InitialBackoff: time.Millisecond,
+		MaxBackoff:     10 * time.Millisecond,
+	}
+	resp, err := callWithRetry(context.Background(), policy, nil, "test", "", doCall)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if !tb.closed {
+		t.Error("429 response body was not closed after retry")
+	}
+}
+
+// TestCallWithRetry_SustainedTrackingNoLeak drives multiple consecutive 429s
+// and asserts every retried body was closed.
+func TestCallWithRetry_SustainedTrackingNoLeak(t *testing.T) {
+	const n = 5
+	bodies := make([]*trackingBody, n)
+	pairs := make([]callPair, n+1)
+	for i := 0; i < n; i++ {
+		bodies[i] = &trackingBody{Reader: strings.NewReader("rate limited")}
+		pairs[i] = callPair{resp429WithBody("0", bodies[i]), nil}
+	}
+	pairs[n] = callPair{resp200(), nil}
+
+	policy := RetryPolicy{
+		MaxAttempts:    n + 1,
+		InitialBackoff: time.Millisecond,
+		MaxBackoff:     10 * time.Millisecond,
+	}
+	resp, err := callWithRetry(context.Background(), policy, nil, "test", "", makeResponses(pairs))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	for i, tb := range bodies {
+		if !tb.closed {
+			t.Errorf("body[%d] was not closed", i)
+		}
+	}
+}
+
+// TestCallWithRetry_429Exhausted_BodyNotClosed is a regression guard: when a
+// 429 occurs on the final attempt, callWithRetry returns it with body open so
+// ownership passes to the caller — we must not close it prematurely.
+func TestCallWithRetry_429Exhausted_BodyNotClosed(t *testing.T) {
+	tb := &trackingBody{Reader: strings.NewReader("rate limited")}
+	doCall := makeResponses([]callPair{
+		{resp429WithBody("", tb), nil},
+	})
+	policy := RetryPolicy{
+		MaxAttempts:    1,
+		InitialBackoff: time.Millisecond,
+		MaxBackoff:     10 * time.Millisecond,
+	}
+	resp, err := callWithRetry(context.Background(), policy, nil, "test", "", doCall)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("expected 429 pass-through, got %d", resp.StatusCode)
+	}
+	if tb.closed {
+		t.Error("final 429 body must not be closed by callWithRetry — caller owns it")
 	}
 }
