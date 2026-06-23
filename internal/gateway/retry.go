@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"math/rand"
 	"net"
@@ -136,6 +137,8 @@ func callWithRetry(
 					"request_id":   requestID,
 				})
 			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
