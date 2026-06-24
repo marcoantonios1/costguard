@@ -36,15 +36,17 @@ type StreamMeter struct {
 	promptEstimate int
 	visionEstimate int
 
-	mu                 sync.Mutex
-	model              string
-	promptTokens       int
-	completionTokens   int
-	totalTokens        int
-	accumulatedTextLen int
+	mu                       sync.Mutex
+	model                    string
+	promptTokens             int
+	completionTokens         int
+	totalTokens              int
+	cacheCreationInputTokens int
+	cacheReadInputTokens     int
+	accumulatedTextLen       int
 
 	doneOnce sync.Once
-	onDone   func(model string, prompt, completion, total int, estimated bool)
+	onDone   func(model string, prompt, completion, total, cacheCreation, cacheRead int, estimated bool)
 }
 
 func newStreamMeter(
@@ -52,7 +54,7 @@ func newStreamMeter(
 	initialModel string,
 	promptEstimate int,
 	visionEstimate int,
-	onDone func(string, int, int, int, bool),
+	onDone func(model string, prompt, completion, total, cacheCreation, cacheRead int, estimated bool),
 ) *StreamMeter {
 	return &StreamMeter{
 		src:            src,
@@ -88,6 +90,7 @@ func (sm *StreamMeter) finish() {
 		sm.mu.Lock()
 		model := sm.model
 		prompt, completion, total := sm.promptTokens, sm.completionTokens, sm.totalTokens
+		cacheCreation, cacheRead := sm.cacheCreationInputTokens, sm.cacheReadInputTokens
 		estimated := false
 
 		if total == 0 {
@@ -105,7 +108,7 @@ func (sm *StreamMeter) finish() {
 			total = prompt + completion
 		}
 		sm.mu.Unlock()
-		sm.onDone(model, prompt, completion, total, estimated)
+		sm.onDone(model, prompt, completion, total, cacheCreation, cacheRead, estimated)
 	})
 }
 
@@ -156,9 +159,11 @@ func (sm *StreamMeter) processLine(line string) {
 	var chunk struct {
 		Model   string `json:"model"`
 		Usage   *struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
+			PromptTokens             int `json:"prompt_tokens"`
+			CompletionTokens         int `json:"completion_tokens"`
+			TotalTokens              int `json:"total_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 		} `json:"usage"`
 		Choices []struct {
 			Delta struct {
@@ -178,6 +183,8 @@ func (sm *StreamMeter) processLine(line string) {
 		sm.promptTokens = chunk.Usage.PromptTokens
 		sm.completionTokens = chunk.Usage.CompletionTokens
 		sm.totalTokens = chunk.Usage.TotalTokens
+		sm.cacheCreationInputTokens = chunk.Usage.CacheCreationInputTokens
+		sm.cacheReadInputTokens = chunk.Usage.CacheReadInputTokens
 	}
 	for _, choice := range chunk.Choices {
 		sm.accumulatedTextLen += len(choice.Delta.Content)

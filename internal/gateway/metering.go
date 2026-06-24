@@ -168,12 +168,14 @@ func (g *Gateway) meterResponse(
 	}
 
 	usageData := metering.Usage{
-		Provider:         providerName,
-		Model:            finalModel,
-		PromptTokens:     meta.PromptTokens,
-		CompletionTokens: meta.CompletionTokens,
-		TotalTokens:      meta.TotalTokens,
-		CacheHit:         false,
+		Provider:                 providerName,
+		Model:                    finalModel,
+		PromptTokens:             meta.PromptTokens,
+		CompletionTokens:         meta.CompletionTokens,
+		TotalTokens:              meta.TotalTokens,
+		CacheHit:                 false,
+		CacheCreationInputTokens: meta.CacheCreationInputTokens,
+		CacheReadInputTokens:     meta.CacheReadInputTokens,
 	}
 
 	cost, priceFound := metering.EstimateCost(usageData)

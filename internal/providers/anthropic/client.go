@@ -311,12 +311,8 @@ func rawJSONResponse(req *http.Request, status int, srcHeader http.Header, body 
 
 func (c *Client) ParseResponseMeta(body []byte) (providers.ResponseMeta, error) {
 	var resp struct {
-		Model string `json:"model"`
-		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
-		} `json:"usage"`
+		Model string     `json:"model"`
+		Usage openAIUsage `json:"usage"`
 	}
 
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -324,10 +320,12 @@ func (c *Client) ParseResponseMeta(body []byte) (providers.ResponseMeta, error) 
 	}
 
 	return providers.ResponseMeta{
-		Model:            resp.Model,
-		PromptTokens:     resp.Usage.PromptTokens,
-		CompletionTokens: resp.Usage.CompletionTokens,
-		TotalTokens:      resp.Usage.TotalTokens,
+		Model:                    resp.Model,
+		PromptTokens:             resp.Usage.PromptTokens,
+		CompletionTokens:         resp.Usage.CompletionTokens,
+		TotalTokens:              resp.Usage.TotalTokens,
+		CacheCreationInputTokens: resp.Usage.CacheCreationInputTokens,
+		CacheReadInputTokens:     resp.Usage.CacheReadInputTokens,
 	}, nil
 }
 

@@ -366,8 +366,11 @@ func toOpenAIResponse(requestModel string, in anthropicMessagesResponse) openAIC
 		msg.Content = &text
 	}
 
-	promptTokens := in.Usage.InputTokens + in.Usage.CacheCreationInputTokens + in.Usage.CacheReadInputTokens
+	// PromptTokens carries only the base (non-cache) input tokens so that
+	// EstimateCost can apply per-class multipliers to each bucket separately.
+	promptTokens := in.Usage.InputTokens
 	completionTokens := in.Usage.OutputTokens
+	totalTokens := promptTokens + in.Usage.CacheCreationInputTokens + in.Usage.CacheReadInputTokens + completionTokens
 
 	return openAIChatCompletionResponse{
 		ID:      in.ID,
@@ -382,9 +385,11 @@ func toOpenAIResponse(requestModel string, in anthropicMessagesResponse) openAIC
 			},
 		},
 		Usage: openAIUsage{
-			PromptTokens:     promptTokens,
-			CompletionTokens: completionTokens,
-			TotalTokens:      promptTokens + completionTokens,
+			PromptTokens:             promptTokens,
+			CompletionTokens:         completionTokens,
+			TotalTokens:              totalTokens,
+			CacheCreationInputTokens: in.Usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     in.Usage.CacheReadInputTokens,
 		},
 	}
 }
@@ -411,15 +416,17 @@ func translateAnthropicStream(requestModel string, r io.Reader, w io.Writer) {
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
 	var (
-		messageID        string
-		model            = requestModel
-		created          = time.Now().Unix()
-		blockTypes       = map[int]string{} // content block index → "text" | "tool_use"
-		toolCallIdx      = map[int]int{}    // content block index → tool_calls array index
-		nextToolIdx      = 0
-		eventType        string
-		inputTokens      int
-		outputTokens     int
+		messageID                string
+		model                    = requestModel
+		created                  = time.Now().Unix()
+		blockTypes               = map[int]string{} // content block index → "text" | "tool_use"
+		toolCallIdx              = map[int]int{}    // content block index → tool_calls array index
+		nextToolIdx              = 0
+		eventType                string
+		inputTokens              int
+		outputTokens             int
+		cacheCreationInputTokens int
+		cacheReadInputTokens     int
 	)
 
 	writeChunk := func(chunk openAIStreamChunk) {
@@ -455,7 +462,9 @@ func translateAnthropicStream(requestModel string, r io.Reader, w io.Writer) {
 					ID    string `json:"id"`
 					Model string `json:"model"`
 					Usage struct {
-						InputTokens int `json:"input_tokens"`
+						InputTokens              int `json:"input_tokens"`
+						CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+						CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 					} `json:"usage"`
 				} `json:"message"`
 			}
@@ -467,6 +476,8 @@ func translateAnthropicStream(requestModel string, r io.Reader, w io.Writer) {
 				model = e.Message.Model
 			}
 			inputTokens = e.Message.Usage.InputTokens
+			cacheCreationInputTokens = e.Message.Usage.CacheCreationInputTokens
+			cacheReadInputTokens = e.Message.Usage.CacheReadInputTokens
 			chunk := base()
 			role := "assistant"
 			chunk.Choices = []openAIStreamChoice{{
@@ -565,7 +576,7 @@ func translateAnthropicStream(requestModel string, r io.Reader, w io.Writer) {
 			}
 			outputTokens = e.Usage.OutputTokens
 			fr := mapStopReason(e.Delta.StopReason)
-			total := inputTokens + outputTokens
+			total := inputTokens + cacheCreationInputTokens + cacheReadInputTokens + outputTokens
 			chunk := base()
 			chunk.Choices = []openAIStreamChoice{{
 				Index:        0,
@@ -573,9 +584,11 @@ func translateAnthropicStream(requestModel string, r io.Reader, w io.Writer) {
 				FinishReason: &fr,
 			}}
 			chunk.Usage = &openAIStreamUsage{
-				PromptTokens:     inputTokens,
-				CompletionTokens: outputTokens,
-				TotalTokens:      total,
+				PromptTokens:             inputTokens,
+				CompletionTokens:         outputTokens,
+				TotalTokens:              total,
+				CacheCreationInputTokens: cacheCreationInputTokens,
+				CacheReadInputTokens:     cacheReadInputTokens,
 			}
 			writeChunk(chunk)
 

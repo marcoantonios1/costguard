@@ -29,7 +29,7 @@ func drain(sm *StreamMeter) ([]byte, error) {
 }
 
 // noDone is a no-op onDone callback.
-func noDone(_ string, _, _, _ int, _ bool) {}
+func noDone(_ string, _, _, _, _, _ int, _ bool) {}
 
 // ---------------------------------------------------------------------------
 // Data passthrough
@@ -56,7 +56,7 @@ func TestStreamMeterPicksUpModelFromChunk(t *testing.T) {
 	input := sseChunk(roleLine) + sseChunk(finishLine) + "data: [DONE]\n\n"
 
 	var gotModel string
-	sm := newStreamMeter(sseBody(input), "initial-model", 0, 0, func(model string, _, _, _ int, _ bool) {
+	sm := newStreamMeter(sseBody(input), "initial-model", 0, 0, func(model string, _, _, _, _, _ int, _ bool) {
 		gotModel = model
 	})
 	_, _ = drain(sm)
@@ -71,7 +71,7 @@ func TestStreamMeterFallsBackToInitialModelWhenNoneInStream(t *testing.T) {
 	input := sseChunk(chunk) + "data: [DONE]\n\n"
 
 	var gotModel string
-	sm := newStreamMeter(sseBody(input), "fallback-model", 0, 0, func(model string, _, _, _ int, _ bool) {
+	sm := newStreamMeter(sseBody(input), "fallback-model", 0, 0, func(model string, _, _, _, _, _ int, _ bool) {
 		gotModel = model
 	})
 	_, _ = drain(sm)
@@ -89,7 +89,7 @@ func TestStreamMeterCollectsTokensFromUsageChunk(t *testing.T) {
 	input := sseChunk(roleLine) + sseChunk(textLine) + sseChunk(finishLine) + "data: [DONE]\n\n"
 
 	var prompt, completion, total int
-	sm := newStreamMeter(sseBody(input), "gpt-4o", 0, 0, func(_ string, p, c, tt int, _ bool) {
+	sm := newStreamMeter(sseBody(input), "gpt-4o", 0, 0, func(_ string, p, c, tt, _, _ int, _ bool) {
 		prompt, completion, total = p, c, tt
 	})
 	_, _ = drain(sm)
@@ -106,7 +106,7 @@ func TestStreamMeterIgnoresChunkWithZeroTotal(t *testing.T) {
 	input := sseChunk(first) + sseChunk(second) + "data: [DONE]\n\n"
 
 	var total int
-	sm := newStreamMeter(sseBody(input), "m", 0, 0, func(_ string, _, _, tt int, _ bool) {
+	sm := newStreamMeter(sseBody(input), "m", 0, 0, func(_ string, _, _, tt, _, _ int, _ bool) {
 		total = tt
 	})
 	_, _ = drain(sm)
@@ -123,7 +123,7 @@ func TestStreamMeterIgnoresChunkWithZeroTotal(t *testing.T) {
 func TestStreamMeterOnDoneFiredOnEOF(t *testing.T) {
 	input := sseChunk(textLine)
 	var called int32
-	sm := newStreamMeter(sseBody(input), "m", 0, 0, func(string, int, int, int, bool) {
+	sm := newStreamMeter(sseBody(input), "m", 0, 0, func(string, int, int, int, int, int, bool) {
 		atomic.AddInt32(&called, 1)
 	})
 	_, _ = drain(sm)
@@ -136,7 +136,7 @@ func TestStreamMeterOnDoneFiredOnEOF(t *testing.T) {
 func TestStreamMeterOnDoneFiredOnDONELine(t *testing.T) {
 	input := sseChunk(finishLine) + "data: [DONE]\n\n"
 	var called int32
-	sm := newStreamMeter(sseBody(input), "m", 0, 0, func(string, int, int, int, bool) {
+	sm := newStreamMeter(sseBody(input), "m", 0, 0, func(string, int, int, int, int, int, bool) {
 		atomic.AddInt32(&called, 1)
 	})
 	_, _ = drain(sm)
@@ -150,7 +150,7 @@ func TestStreamMeterOnDoneFiredOnClose(t *testing.T) {
 	pr, pw := io.Pipe()
 
 	var called int32
-	sm := newStreamMeter(io.NopCloser(pr), "m", 0, 0, func(string, int, int, int, bool) {
+	sm := newStreamMeter(io.NopCloser(pr), "m", 0, 0, func(string, int, int, int, int, int, bool) {
 		atomic.AddInt32(&called, 1)
 	})
 
@@ -175,7 +175,7 @@ func TestStreamMeterOnDoneFiredOnClose(t *testing.T) {
 func TestStreamMeterOnDoneCalledExactlyOnce(t *testing.T) {
 	input := sseChunk(finishLine) + "data: [DONE]\n\n"
 	var called int32
-	sm := newStreamMeter(sseBody(input), "m", 0, 0, func(string, int, int, int, bool) {
+	sm := newStreamMeter(sseBody(input), "m", 0, 0, func(string, int, int, int, int, int, bool) {
 		atomic.AddInt32(&called, 1)
 	})
 	_, _ = drain(sm)
@@ -194,7 +194,7 @@ func TestStreamMeterHandlesPartialReads(t *testing.T) {
 	input := sseChunk(finishLine) + "data: [DONE]\n\n"
 
 	var prompt, total int
-	sm := newStreamMeter(sseBody(input), "m", 0, 0, func(_ string, p, _, tt int, _ bool) {
+	sm := newStreamMeter(sseBody(input), "m", 0, 0, func(_ string, p, _, tt, _, _ int, _ bool) {
 		prompt, total = p, tt
 	})
 
@@ -221,7 +221,7 @@ func TestStreamMeterFallback_NoUsageChunk(t *testing.T) {
 
 	var gotPrompt, gotCompletion, gotTotal int
 	var gotEstimated bool
-	sm := newStreamMeter(sseBody(input), "gpt-4o", 20, 0, func(_ string, p, c, tt int, est bool) {
+	sm := newStreamMeter(sseBody(input), "gpt-4o", 20, 0, func(_ string, p, c, tt, _, _ int, est bool) {
 		gotPrompt, gotCompletion, gotTotal = p, c, tt
 		gotEstimated = est
 	})
@@ -246,7 +246,7 @@ func TestStreamMeterFallback_WithUsageChunk(t *testing.T) {
 
 	var gotPrompt, gotCompletion, gotTotal int
 	var gotEstimated bool
-	sm := newStreamMeter(sseBody(input), "m", 100, 0, func(_ string, p, c, tt int, est bool) {
+	sm := newStreamMeter(sseBody(input), "m", 100, 0, func(_ string, p, c, tt, _, _ int, est bool) {
 		gotPrompt, gotCompletion, gotTotal = p, c, tt
 		gotEstimated = est
 	})
@@ -276,7 +276,7 @@ func TestStreamMeterVisionEstimate_FallbackPath(t *testing.T) {
 
 	var gotPrompt, gotTotal int
 	var gotEstimated bool
-	sm := newStreamMeter(sseBody(input), "m", promptEst, visionEst, func(_ string, p, _, tt int, est bool) {
+	sm := newStreamMeter(sseBody(input), "m", promptEst, visionEst, func(_ string, p, _, tt, _, _ int, est bool) {
 		gotPrompt, gotTotal = p, tt
 		gotEstimated = est
 	})
@@ -307,7 +307,7 @@ func TestStreamMeterVisionEstimate_RealUsageZeroPrompt(t *testing.T) {
 
 	var gotPrompt, gotTotal int
 	var gotEstimated bool
-	sm := newStreamMeter(sseBody(input), "m", 0, visionEst, func(_ string, p, _, tt int, est bool) {
+	sm := newStreamMeter(sseBody(input), "m", 0, visionEst, func(_ string, p, _, tt, _, _ int, est bool) {
 		gotPrompt, gotTotal = p, tt
 		gotEstimated = est
 	})
@@ -331,7 +331,7 @@ func TestStreamMeterVisionEstimate_RealUsageNonZeroPrompt(t *testing.T) {
 	input := sseChunk(finishLine) + "data: [DONE]\n\n" // prompt=10, completion=5, total=15
 
 	var gotPrompt, gotTotal int
-	sm := newStreamMeter(sseBody(input), "m", 0, 999, func(_ string, p, _, tt int, _ bool) {
+	sm := newStreamMeter(sseBody(input), "m", 0, 999, func(_ string, p, _, tt, _, _ int, _ bool) {
 		gotPrompt, gotTotal = p, tt
 	})
 	_, _ = drain(sm)
@@ -376,7 +376,7 @@ func TestStreamMeterOversizedLine_BufferCapped(t *testing.T) {
 	body := []byte(bodyStr)
 
 	var gotTotal int
-	sm := newStreamMeter(sseBody(bodyStr), "gpt-4o", 0, 0, func(_ string, _, _, tt int, _ bool) {
+	sm := newStreamMeter(sseBody(bodyStr), "gpt-4o", 0, 0, func(_ string, _, _, tt, _, _ int, _ bool) {
 		gotTotal = tt
 	})
 
@@ -406,7 +406,7 @@ func TestStreamMeterMislabeledNonSSEBody(t *testing.T) {
 
 	var doneCount int32
 	var gotEstimated bool
-	sm := newStreamMeter(sseBody(bodyStr), "m", 0, 0, func(_ string, _, _, _ int, est bool) {
+	sm := newStreamMeter(sseBody(bodyStr), "m", 0, 0, func(_ string, _, _, _, _, _ int, est bool) {
 		atomic.AddInt32(&doneCount, 1)
 		gotEstimated = est
 	})
@@ -440,7 +440,7 @@ func TestStreamMeterOverflowRecovery_MultipleConsecutiveLongLines(t *testing.T) 
 	body := []byte(bodyStr)
 
 	var gotTotal int
-	sm := newStreamMeter(sseBody(bodyStr), "gpt-4o", 0, 0, func(_ string, _, _, tt int, _ bool) {
+	sm := newStreamMeter(sseBody(bodyStr), "gpt-4o", 0, 0, func(_ string, _, _, tt, _, _ int, _ bool) {
 		gotTotal = tt
 	})
 
