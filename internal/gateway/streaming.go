@@ -42,8 +42,8 @@ func (g *Gateway) passthroughStreaming(r *http.Request, resp *http.Response, pro
 	agent := r.Header.Get("X-Costguard-Agent")
 	path := r.URL.Path
 
-	meter := newStreamMeter(resp.Body, model, promptEstimate, visionEstimate, func(finalModel string, prompt, completion, total int, estimated bool) {
-		go g.meterStreamingUsage(ctx, requestID, providerName, team, project, user, agent, path, finalModel, prompt, completion, total, estimated)
+	meter := newStreamMeter(resp.Body, model, promptEstimate, visionEstimate, func(finalModel string, prompt, completion, total, cacheCreation, cacheRead int, estimated bool) {
+		go g.meterStreamingUsage(ctx, requestID, providerName, team, project, user, agent, path, finalModel, prompt, completion, total, cacheCreation, cacheRead, estimated)
 	})
 
 	return &http.Response{
@@ -61,14 +61,17 @@ func (g *Gateway) meterStreamingUsage(
 	team, project, user, agent, path string,
 	model string,
 	promptTokens, completionTokens, totalTokens int,
+	cacheCreationInputTokens, cacheReadInputTokens int,
 	estimated bool,
 ) {
 	usageData := metering.Usage{
-		Provider:         providerName,
-		Model:            model,
-		PromptTokens:     promptTokens,
-		CompletionTokens: completionTokens,
-		TotalTokens:      totalTokens,
+		Provider:                 providerName,
+		Model:                    model,
+		PromptTokens:             promptTokens,
+		CompletionTokens:         completionTokens,
+		TotalTokens:              totalTokens,
+		CacheCreationInputTokens: cacheCreationInputTokens,
+		CacheReadInputTokens:     cacheReadInputTokens,
 	}
 
 	cost, priceFound := metering.EstimateCost(usageData)
