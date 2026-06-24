@@ -15,10 +15,12 @@ const (
 )
 
 type ResponseMeta struct {
-	Model            string
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
+	Model                    string
+	PromptTokens             int // base (non-cache) input tokens only
+	CompletionTokens         int
+	TotalTokens              int
+	CacheCreationInputTokens int
+	CacheReadInputTokens     int
 }
 
 type ErrorBody struct {
