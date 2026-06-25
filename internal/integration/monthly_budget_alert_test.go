@@ -11,10 +11,18 @@ import (
 	"github.com/marcoantonios1/costguard/internal/budget"
 	"github.com/marcoantonios1/costguard/internal/cache"
 	"github.com/marcoantonios1/costguard/internal/gateway"
+	"github.com/marcoantonios1/costguard/internal/notify"
 	"github.com/marcoantonios1/costguard/internal/providers"
 	openai_provider "github.com/marcoantonios1/costguard/internal/providers/openai"
 	openai_http "github.com/marcoantonios1/costguard/internal/server/openai"
 )
+
+// alwaysSucceedNotifier is a no-op Notifier that always returns nil. Tests that
+// need MarkSent to fire (i.e. that verify alert dedup) must wire this so the
+// gateway treats the email as delivered and records the threshold as sent.
+type alwaysSucceedNotifier struct{}
+
+func (alwaysSucceedNotifier) Send(_ context.Context, _ notify.Message) error { return nil }
 
 // ---------------------------------------------------------------------------
 // fixedSpendReader — returns a preset total spend so tests can place the
@@ -103,6 +111,7 @@ func newMonthlyAlertHarness(
 		Cache:         cache.NewMemory(0),
 		BudgetChecker: budgetSvc,
 		AlertStore:    alerts,
+		Notifier:      alwaysSucceedNotifier{},
 	})
 	if err != nil {
 		panic("gateway.New: " + err.Error())

@@ -553,6 +553,7 @@ func newHarnessWithBudgetAndCache(reg *providers.Registry, monthlyUSD float64, a
 		UsageStore:    store,
 		BudgetChecker: budgetSvc,
 		AlertStore:    alerts,
+		Notifier:      alwaysSucceedNotifier{},
 	})
 	if err != nil {
 		panic("gateway.New: " + err.Error())
