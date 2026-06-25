@@ -12,6 +12,61 @@ import (
 	"github.com/marcoantonios1/costguard/internal/usage"
 )
 
+// meterFailedResponse records a zero-cost usage.Record for non-200 upstream
+// responses. Token parsing is skipped entirely — error bodies do not contain
+// usage data, and zero cost avoids polluting spend totals in /admin/usage/summary.
+func (g *Gateway) meterFailedResponse(
+	r *http.Request,
+	providerName string,
+	model string,
+	statusCode int,
+) {
+	if g.usageStore == nil {
+		return
+	}
+	requestID := server.RequestIDFromContext(r.Context())
+	team := r.Header.Get("X-Costguard-Team")
+	project := r.Header.Get("X-Costguard-Project")
+	user := r.Header.Get("X-Costguard-User")
+	agent := r.Header.Get("X-Costguard-Agent")
+
+	if g.log != nil {
+		g.log.Warn("request_failed_upstream", map[string]any{
+			"request_id":  requestID,
+			"provider":    providerName,
+			"model":       model,
+			"status_code": statusCode,
+			"agent":       agent,
+		})
+	}
+
+	record := usage.Record{
+		RequestID:        requestID,
+		Timestamp:        time.Now().UTC(),
+		Provider:         providerName,
+		Model:            model,
+		PromptTokens:     0,
+		CompletionTokens: 0,
+		TotalTokens:      0,
+		EstimatedCostUSD: 0,
+		PriceFound:       false,
+		CacheHit:         false,
+		Team:             team,
+		Project:          project,
+		User:             user,
+		Agent:            agent,
+		Path:             r.URL.Path,
+		StatusCode:       statusCode,
+	}
+
+	if err := g.usageStore.Save(r.Context(), record); err != nil && g.log != nil {
+		g.log.Error("usage_save_failed", map[string]any{
+			"request_id": requestID,
+			"error":      err.Error(),
+		})
+	}
+}
+
 // estimateVisionTokens returns a client-side image token estimate for the
 // request body, dispatched by provider family. Returns 0 for providers that
 // report image tokens in their usage response (gemini) or have no estimation
