@@ -146,13 +146,15 @@ func (s *Service) CheckRequestBudget(
 	to := from.AddDate(0, 1, 0)
 
 	// -------- GLOBAL BUDGET --------
-	total, err := s.usage.GetTotalSpend(ctx, from, to)
-	if err != nil {
-		return err
-	}
+	if s.cfg.MonthlyUSD > 0 {
+		total, err := s.usage.GetTotalSpend(ctx, from, to)
+		if err != nil {
+			return err
+		}
 
-	if s.cfg.MonthlyUSD > 0 && total >= s.cfg.MonthlyUSD {
-		return ErrMonthlyBudgetExceeded
+		if total >= s.cfg.MonthlyUSD {
+			return ErrMonthlyBudgetExceeded
+		}
 	}
 
 	// -------- TEAM BUDGET --------
