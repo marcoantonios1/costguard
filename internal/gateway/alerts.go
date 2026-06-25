@@ -55,14 +55,17 @@ func (g *Gateway) emitMonthlyBudgetAlertOnce(
 		}
 	}
 
-	emailSent := true
+	// Only mark the alert as sent when it was actually delivered. Defaulting to
+	// true when g.notifier == nil would permanently suppress the alert for the
+	// rest of the billing period, preventing delivery once a notifier is wired up.
+	delivered := false
 	if g.notifier != nil {
-		if err := g.sendBudgetAlertEmail(ctx, thresholdPercent, periodStart); err != nil {
-			emailSent = false
+		if err := g.sendBudgetAlertEmail(ctx, thresholdPercent, periodStart); err == nil {
+			delivered = true
 		}
 	}
 
-	if emailSent {
+	if delivered {
 		if err := g.alertStore.MarkSent(ctx, periodStart, thresholdPercent, alertType); err != nil && g.log != nil {
 			g.log.Error("budget_alert_mark_sent_failed", map[string]any{
 				"threshold_percent": thresholdPercent,
