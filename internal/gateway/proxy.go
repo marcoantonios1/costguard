@@ -182,6 +182,29 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 		project := r.Header.Get("X-Costguard-Project")
 		agent := r.Header.Get("X-Costguard-Agent")
 
+		// Non-blocking monthly threshold check — only drives 80%/90% alerting,
+		// never rejects the request. Checked before CheckRequestBudget so alerts
+		// fire even on requests that are subsequently blocked by a budget limit.
+		//
+		// If spend has jumped straight past 80% to ≥90% (or ≥100%) in one step,
+		// we emit both lower-threshold alerts because CheckMonthlyBudget returns
+		// only the highest-crossed sentinel.
+		if monthlyErr := g.budgetChecker.CheckMonthlyBudget(r.Context(), now); monthlyErr != nil {
+			switch {
+			case errors.Is(monthlyErr, budget.ErrMonthlyBudgetExceeded):
+				// ≥100% implies 80% and 90% were also crossed.
+				// The 100% alert itself is emitted by the CheckRequestBudget branch below.
+				g.emitMonthlyBudgetAlertOnce(r.Context(), now, 80)
+				g.emitMonthlyBudgetAlertOnce(r.Context(), now, 90)
+			case errors.Is(monthlyErr, budget.ErrMonthlyBudgetReachedNinetyPercent):
+				// ≥90% implies 80% was also crossed.
+				g.emitMonthlyBudgetAlertOnce(r.Context(), now, 80)
+				g.emitMonthlyBudgetAlertOnce(r.Context(), now, 90)
+			case errors.Is(monthlyErr, budget.ErrMonthlyBudgetReachedEightyPercent):
+				g.emitMonthlyBudgetAlertOnce(r.Context(), now, 80)
+			}
+		}
+
 		if err := g.budgetChecker.CheckRequestBudget(r.Context(), now, team, project, agent); err != nil {
 			if errors.Is(err, budget.ErrMonthlyBudgetExceeded) {
 				g.emitMonthlyBudgetAlertOnce(r.Context(), now, 100)
