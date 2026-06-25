@@ -342,6 +342,15 @@ func (g *Gateway) Proxy(r *http.Request) (*http.Response, error) {
 
 	resp, actualProvider, finalModel, err := g.callProviderWithFallback(r, providerName, effectiveBodyBytes, effectiveModel)
 	if err != nil {
+		// Meter upstream 5xx failures so they appear in /admin/usage/*.
+		// 5xx responses are converted to errors in callSingleProvider so that
+		// retry/fallback/breaker machinery can act on them, bypassing
+		// maybeStoreAndReturn. The typed error carries the real upstream status.
+		var upstreamErr *upstreamStatusError
+		if errors.As(err, &upstreamErr) {
+			g.meterFailedResponse(r, actualProvider, finalModel, upstreamErr.statusCode)
+		}
+
 		category, errType := gatewayErrorCategoryAndType(err)
 		if g.log != nil {
 			g.log.Error("provider_error", map[string]any{

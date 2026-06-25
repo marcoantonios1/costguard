@@ -16,6 +16,19 @@ import (
 	"github.com/marcoantonios1/costguard/internal/server"
 )
 
+// upstreamStatusError is returned for upstream 5xx responses. It preserves the
+// original HTTP status code so proxy.go can record it in the usage store, while
+// keeping the "upstream_5xx" substring that is5xxError and
+// isRetryableProviderError rely on for retry/fallback/breaker decisions.
+type upstreamStatusError struct {
+	statusCode int
+	provider   string
+}
+
+func (e *upstreamStatusError) Error() string {
+	return fmt.Sprintf("upstream_5xx status=%d provider=%s", e.statusCode, e.provider)
+}
+
 func (g *Gateway) maybeStoreAndReturn(
 	r *http.Request,
 	reqBodyBytes []byte,
@@ -29,6 +42,20 @@ func (g *Gateway) maybeStoreAndReturn(
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		// Meter a zero-cost record so 4xx responses appear in /admin/usage/*.
+		// The body and headers are passed back unchanged to the caller.
+		//
+		// Streaming + non-200 is unreachable: callSingleProvider forces
+		// Content-Type: application/json for all error responses, so
+		// isStreamingResponse can never return true for a non-200 response.
+		//
+		// Cache writes are intentionally skipped — failed responses must never
+		// be served from cache on subsequent requests.
+		//
+		// 5xx responses are converted to Go errors in callSingleProvider so that
+		// retry/fallback/breaker machinery can act on them; they are metered in
+		// proxy.go via the error path instead.
+		g.meterFailedResponse(r, providerName, model, resp.StatusCode)
 		return resp, nil
 	}
 
@@ -277,7 +304,7 @@ func (g *Gateway) callSingleProvider(r *http.Request, providerName string, bodyB
 					Timestamp:     time.Now(),
 					ErrorCategory: providers.ErrCategoryUpstreamFailure,
 				})
-				return nil, fmt.Errorf("upstream_5xx status=%d provider=%s", resp.StatusCode, providerName)
+				return nil, &upstreamStatusError{statusCode: resp.StatusCode, provider: providerName}
 			}
 
 			g.recordOutcome(providerName, health.Outcome{
