@@ -60,8 +60,16 @@ func exponentialBackoff(initial, maxB time.Duration, attempt int) time.Duration 
 	return d
 }
 
-// parseRetryAfterSeconds reads the Retry-After header as a float number of seconds.
-// Returns 0, false when absent or unparseable.
+// parseRetryAfterSeconds reads the Retry-After header and returns the delay in
+// seconds. It accepts both forms permitted by RFC 9110:
+//   - A decimal number of seconds ("120", "0.5").
+//   - An HTTP-date ("Wed, 21 Oct 2099 07:28:00 GMT"). The delay is computed as
+//     time.Until(parsedTime). If the date is in the past the delay is 0 and ok
+//     is still true — the header was valid, just already expired, so the caller
+//     should retry immediately rather than treating the header as absent.
+//
+// Returns (0, false) when the header is absent or cannot be parsed by either
+// method; the caller falls back to exponential backoff in that case.
 func parseRetryAfterSeconds(resp *http.Response) (float64, bool) {
 	if resp == nil {
 		return 0, false
@@ -70,11 +78,17 @@ func parseRetryAfterSeconds(resp *http.Response) (float64, bool) {
 	if ra == "" {
 		return 0, false
 	}
-	secs, err := strconv.ParseFloat(ra, 64)
-	if err != nil {
-		return 0, false
+	if secs, err := strconv.ParseFloat(ra, 64); err == nil {
+		return secs, true
 	}
-	return secs, true
+	if t, err := http.ParseTime(ra); err == nil {
+		d := time.Until(t)
+		if d <= 0 {
+			return 0, true
+		}
+		return d.Seconds(), true
+	}
+	return 0, false
 }
 
 // callWithRetry runs doCall up to policy.MaxAttempts times, retrying on 429,
