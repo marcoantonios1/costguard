@@ -383,5 +383,12 @@ func cloneRequestWithBody(r *http.Request, bodyBytes []byte) *http.Request {
 	reqCopy := r.Clone(r.Context())
 	reqCopy.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	reqCopy.ContentLength = int64(len(bodyBytes))
+	// Remove any stale Content-Length from the cloned header map so it can't
+	// shadow reqCopy.ContentLength. Current adapters (openaicompat rebuilds
+	// headers from scratch; anthropic/gemini use a strict whitelist via
+	// copyAllowedHeaders) already never forward this header, but deleting it
+	// here is belt-and-suspenders for any future adapter that copies req.Header
+	// verbatim.
+	reqCopy.Header.Del("Content-Length")
 	return reqCopy
 }
