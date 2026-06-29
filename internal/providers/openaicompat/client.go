@@ -149,12 +149,27 @@ func multimodalNotAllowedResponse(req *http.Request) *http.Response {
 
 func requestHasToolCalls(body []byte) bool {
 	var req struct {
-		Tools []any `json:"tools"`
+		Tools    []any `json:"tools"`
+		Messages []struct {
+			Role      string `json:"role"`
+			ToolCalls []any  `json:"tool_calls"`
+		} `json:"messages"`
 	}
 	if json.Unmarshal(body, &req) != nil {
 		return false
 	}
-	return len(req.Tools) > 0
+	if len(req.Tools) > 0 {
+		return true
+	}
+	for _, msg := range req.Messages {
+		if msg.Role == "tool" {
+			return true
+		}
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func toolsNotAllowedResponse(req *http.Request) *http.Response {
