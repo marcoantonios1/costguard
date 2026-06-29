@@ -478,6 +478,127 @@ func TestGuard_ImageRejectedBeforeToolsCheck(t *testing.T) {
 	}
 }
 
+// continuationToolResultPayload is a follow-up turn that sends a tool result
+// back — it has no `tools` field, only a role:"tool" message.
+const continuationToolResultPayload = `{"model":"llama3","messages":[{"role":"user","content":"What is the weather?"},{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_1","content":"15°C, cloudy"}]}`
+
+// continuationAssistantToolCallsPayload is a follow-up turn where the prior
+// assistant message still carries tool_calls — no top-level `tools` field.
+const continuationAssistantToolCallsPayload = `{"model":"llama3","messages":[{"role":"user","content":"What is the weather?"},{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{}"}}]}]}`
+
+func TestGuard_ContinuationToolResultRejectedByDefault(t *testing.T) {
+	var received []byte
+	srv := compatStubServer(t, &received)
+	defer srv.Close()
+
+	// supportTools=false — the continuation turn (role:"tool") must be blocked.
+	client := compatClientWithTools(t, srv.URL, false, false)
+
+	resp, err := client.Do(context.Background(), compatRequest(t, srv.URL, continuationToolResultPayload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
+	if len(received) != 0 {
+		t.Errorf("upstream should not have been called, got body: %s", received)
+	}
+
+	var errBody struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+		} `json:"error"`
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(body, &errBody); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if errBody.Error.Type != "invalid_request_error" {
+		t.Errorf("error type: got %q, want invalid_request_error", errBody.Error.Type)
+	}
+}
+
+func TestGuard_ContinuationToolResultAllowedWhenSupportToolsEnabled(t *testing.T) {
+	var received []byte
+	srv := compatStubServer(t, &received)
+	defer srv.Close()
+
+	client := compatClientWithTools(t, srv.URL, false, true)
+
+	resp, err := client.Do(context.Background(), compatRequest(t, srv.URL, continuationToolResultPayload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200", resp.StatusCode)
+	}
+	if string(received) != continuationToolResultPayload {
+		t.Errorf("upstream received wrong body\ngot:  %s\nwant: %s", received, continuationToolResultPayload)
+	}
+}
+
+func TestGuard_ContinuationAssistantToolCallsRejectedByDefault(t *testing.T) {
+	var received []byte
+	srv := compatStubServer(t, &received)
+	defer srv.Close()
+
+	// supportTools=false — assistant message with tool_calls must be blocked.
+	client := compatClientWithTools(t, srv.URL, false, false)
+
+	resp, err := client.Do(context.Background(), compatRequest(t, srv.URL, continuationAssistantToolCallsPayload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
+	if len(received) != 0 {
+		t.Errorf("upstream should not have been called, got body: %s", received)
+	}
+
+	var errBody struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(body, &errBody); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if errBody.Error.Type != "invalid_request_error" {
+		t.Errorf("error type: got %q, want invalid_request_error", errBody.Error.Type)
+	}
+}
+
+func TestGuard_ContinuationAssistantToolCallsAllowedWhenSupportToolsEnabled(t *testing.T) {
+	var received []byte
+	srv := compatStubServer(t, &received)
+	defer srv.Close()
+
+	client := compatClientWithTools(t, srv.URL, false, true)
+
+	resp, err := client.Do(context.Background(), compatRequest(t, srv.URL, continuationAssistantToolCallsPayload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200", resp.StatusCode)
+	}
+	if string(received) != continuationAssistantToolCallsPayload {
+		t.Errorf("upstream received wrong body\ngot:  %s\nwant: %s", received, continuationAssistantToolCallsPayload)
+	}
+}
+
 func TestGuard_ToolsGuardSkippedOnNonChatPath(t *testing.T) {
 	var received []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
