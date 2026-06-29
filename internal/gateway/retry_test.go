@@ -377,3 +377,71 @@ func TestCallWithRetry_429Exhausted_BodyNotClosed(t *testing.T) {
 		t.Error("final 429 body must not be closed by callWithRetry — caller owns it")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// parseRetryAfterSeconds unit tests
+// ---------------------------------------------------------------------------
+
+func makeRetryAfterResp(header string) *http.Response {
+	h := make(http.Header)
+	if header != "" {
+		h.Set("Retry-After", header)
+	}
+	return &http.Response{StatusCode: http.StatusTooManyRequests, Header: h, Body: http.NoBody}
+}
+
+func TestParseRetryAfterSeconds_Numeric(t *testing.T) {
+	secs, ok := parseRetryAfterSeconds(makeRetryAfterResp("120"))
+	if !ok {
+		t.Fatal("ok: got false, want true")
+	}
+	if secs != 120 {
+		t.Errorf("secs: got %v, want 120", secs)
+	}
+}
+
+func TestParseRetryAfterSeconds_HTTPDateFuture(t *testing.T) {
+	const offset = 90 * time.Second
+	future := time.Now().Add(offset).UTC().Format(http.TimeFormat)
+
+	secs, ok := parseRetryAfterSeconds(makeRetryAfterResp(future))
+	if !ok {
+		t.Fatalf("ok: got false, want true (header: %q)", future)
+	}
+	const tol = 2.0
+	if secs < float64(offset/time.Second)-tol || secs > float64(offset/time.Second)+tol {
+		t.Errorf("secs: got %v, want ~%v (±%v)", secs, offset.Seconds(), tol)
+	}
+}
+
+func TestParseRetryAfterSeconds_HTTPDatePast(t *testing.T) {
+	past := time.Now().Add(-30 * time.Second).UTC().Format(http.TimeFormat)
+
+	secs, ok := parseRetryAfterSeconds(makeRetryAfterResp(past))
+	if !ok {
+		t.Fatal("ok: got false, want true — past date is valid, signals immediate retry")
+	}
+	if secs != 0 {
+		t.Errorf("secs: got %v, want 0 (past date → retry immediately)", secs)
+	}
+}
+
+func TestParseRetryAfterSeconds_Malformed(t *testing.T) {
+	secs, ok := parseRetryAfterSeconds(makeRetryAfterResp("banana"))
+	if ok {
+		t.Error("ok: got true, want false for garbage value")
+	}
+	if secs != 0 {
+		t.Errorf("secs: got %v, want 0", secs)
+	}
+}
+
+func TestParseRetryAfterSeconds_Empty(t *testing.T) {
+	secs, ok := parseRetryAfterSeconds(makeRetryAfterResp(""))
+	if ok {
+		t.Error("ok: got true, want false for absent header")
+	}
+	if secs != 0 {
+		t.Errorf("secs: got %v, want 0", secs)
+	}
+}
