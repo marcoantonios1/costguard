@@ -34,7 +34,15 @@ func (m *Memory) Get(key string) (Entry, bool) {
 
 	if now.After(entry.ExpiresAt) {
 		m.mu.Lock()
-		delete(m.entries, key)
+		current, stillThere := m.entries[key]
+		if stillThere && !now.After(current.ExpiresAt) {
+			// A fresh entry was Set concurrently between RUnlock and Lock — keep it.
+			m.mu.Unlock()
+			return cloneEntry(current), true
+		}
+		if stillThere {
+			delete(m.entries, key)
+		}
 		m.mu.Unlock()
 		return Entry{}, false
 	}
