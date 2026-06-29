@@ -54,14 +54,14 @@ func (m *Memory) Set(key string, entry Entry) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// very simple eviction for Phase A:
-	// if full, delete one expired entry first, otherwise delete one arbitrary key
+	// Eviction: sweep ALL expired entries before falling back to evicting a live
+	// one (pairs with the write-lock re-check in Get from #198 — both protect
+	// live/hot entries from being dropped incorrectly).
 	if len(m.entries) >= m.maxKeys {
 		now := time.Now()
 		for k, v := range m.entries {
 			if now.After(v.ExpiresAt) {
 				delete(m.entries, k)
-				break
 			}
 		}
 		if len(m.entries) >= m.maxKeys {
