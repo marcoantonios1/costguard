@@ -222,6 +222,28 @@ func TestFeedback_InvalidOutcome(t *testing.T) {
 	}
 }
 
+// TestFeedback_RouteNotRegisteredWhenDisabled mirrors internal/app/app.go's
+// conditional registration: when Feedback.LogPath is empty, /v1/feedback is
+// never wired into the mux, so unmatched requests hit the default 404.
+func TestFeedback_RouteNotRegisteredWhenDisabled(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/v1/feedback", "application/json", bytes.NewReader(validBody("svc-a")))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", resp.StatusCode)
+	}
+}
+
 func TestFeedback_MalformedJSON(t *testing.T) {
 	ts, _ := newTestServer(t)
 	defer ts.Close()
