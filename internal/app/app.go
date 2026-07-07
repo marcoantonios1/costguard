@@ -658,6 +658,10 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 		}
 		fbHandler := feedback.NewHandler(fbStore, log)
 		mux.Handle("/v1/feedback", server.AdminAuth(cfg.Admin.APIKey)(fbHandler))
+
+		fbReader := feedback.NewReader(cfg.Feedback.LogPath)
+		statsHandler := feedback.NewStatsHandler(fbReader)
+		mux.Handle("/v1/feedback/stats", server.AdminAuth(cfg.Admin.APIKey)(statsHandler))
 	} else {
 		log.Warn("feedback_disabled", map[string]any{"reason": "feedback.log_path not configured"})
 	}
