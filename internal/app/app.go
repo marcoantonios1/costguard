@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 	"github.com/marcoantonios1/costguard/internal/cache"
 	"github.com/marcoantonios1/costguard/internal/config"
 	"github.com/marcoantonios1/costguard/internal/database"
+	"github.com/marcoantonios1/costguard/internal/feedback"
 	"github.com/marcoantonios1/costguard/internal/gateway"
 	"github.com/marcoantonios1/costguard/internal/logging"
 	"github.com/marcoantonios1/costguard/internal/metering"
@@ -648,6 +650,17 @@ func New(cfg config.Config, log *logging.Log) (*App, error) {
 
 	protectedAdmin := server.AdminAuth(cfg.Admin.APIKey)(adminMux)
 	mux.Handle("/admin/", http.StripPrefix("/admin", protectedAdmin))
+
+	if cfg.Feedback.LogPath != "" {
+		fbStore, err := feedback.NewJSONLStore(cfg.Feedback.LogPath)
+		if err != nil {
+			return nil, fmt.Errorf("feedback store: %w", err)
+		}
+		fbHandler := feedback.NewHandler(fbStore, log)
+		mux.Handle("/v1/feedback", server.AdminAuth(cfg.Admin.APIKey)(fbHandler))
+	} else {
+		log.Warn("feedback_disabled", map[string]any{"reason": "feedback.log_path not configured"})
+	}
 
 	handler := server.LoggingMiddleware(log, mux)
 

@@ -13,6 +13,11 @@
     "api_key": "env:ADMIN_API_KEY"
   },
 
+  "feedback": {
+    "log_path": "",
+    "_log_path_example": "/var/log/costguard/feedback.jsonl"
+  },
+
   "reports": {
     "monthly_enabled": true,
     "check_interval": "24h",

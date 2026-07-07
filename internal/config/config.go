@@ -23,7 +23,13 @@ type Config struct {
 	Admin     AdminConfig     `json:"admin"`
 	Audio     AudioConfig
 	Embedding EmbeddingConfig
-	Pricing   PricingConfig `json:"pricing"`
+	Pricing   PricingConfig  `json:"pricing"`
+	Feedback  FeedbackConfig `json:"feedback"`
+}
+
+// FeedbackConfig configures the append-only feedback ingestion endpoint.
+type FeedbackConfig struct {
+	LogPath string `json:"log_path"` // e.g. "/var/log/costguard/feedback.jsonl"
 }
 
 // PriceEntry holds the token pricing for a single model.
@@ -324,6 +330,7 @@ func Load(path string) (Config, error) {
 		Admin     AdminConfig    `json:"admin"`
 		Routing   RoutingConfig  `json:"routing"`
 		Pricing   PricingConfig  `json:"pricing"`
+		Feedback  FeedbackConfig `json:"feedback"`
 		Providers struct {
 			OpenAI           map[string]rawOpenAIProvider           `json:"openai"`
 			Anthropic        map[string]rawAnthropicProvider        `json:"anthropic"`
@@ -353,6 +360,8 @@ func Load(path string) (Config, error) {
 
 	c.Admin = rc.Admin
 	c.Admin.APIKey = resolveEnv(rc.Admin.APIKey)
+
+	c.Feedback = rc.Feedback
 
 	c.Notify.Email.Username = resolveEnv(rc.Notify.Email.Username)
 	c.Notify.Email.Password = resolveEnv(rc.Notify.Email.Password)
