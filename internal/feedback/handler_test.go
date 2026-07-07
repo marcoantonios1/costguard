@@ -41,6 +41,229 @@ func newTestServer(t *testing.T) (*httptest.Server, string) {
 	return httptest.NewServer(mux), path
 }
 
+func newStatsTestServer(t *testing.T) (*httptest.Server, string) {
+	t.Helper()
+
+	f, err := os.CreateTemp(t.TempDir(), "feedback-*.jsonl")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	path := f.Name()
+	f.Close()
+
+	reader := feedback.NewReader(path)
+	h := feedback.NewStatsHandler(reader)
+
+	mux := http.NewServeMux()
+	mux.Handle("/v1/feedback/stats", server.AdminAuth(testAPIKey)(h))
+
+	return httptest.NewServer(mux), path
+}
+
+func seedRecords(t *testing.T, path string, records ...feedback.FeedbackRecord) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open temp file: %v", err)
+	}
+	defer f.Close()
+	for _, r := range records {
+		b, err := json.Marshal(r)
+		if err != nil {
+			t.Fatalf("marshal record: %v", err)
+		}
+		if _, err := fmt.Fprintf(f, "%s\n", b); err != nil {
+			t.Fatalf("write record: %v", err)
+		}
+	}
+}
+
+func getStats(t *testing.T, ts *httptest.Server, query string) (int, feedback.ModelStats) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/feedback/stats"+query, nil)
+	req.Header.Set("Authorization", "Bearer "+testAPIKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var stats feedback.ModelStats
+	if resp.StatusCode == http.StatusOK {
+		if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+	}
+	return resp.StatusCode, stats
+}
+
+func TestStats_AllRecords(t *testing.T) {
+	ts, path := newStatsTestServer(t)
+	defer ts.Close()
+
+	seedRecords(t, path,
+		feedback.FeedbackRecord{Consumer: "forge", Role: "coder", Model: "qwen3-coder:30b", Outcome: "success"},
+		feedback.FeedbackRecord{Consumer: "forge", Role: "coder", Model: "qwen3-coder:30b", Outcome: "failure"},
+		feedback.FeedbackRecord{Consumer: "other", Role: "reviewer", Model: "claude-sonnet-4-6", Outcome: "success"},
+	)
+
+	status, stats := getStats(t, ts, "")
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if stats.TaskCount != 3 {
+		t.Fatalf("expected TaskCount 3, got %d", stats.TaskCount)
+	}
+}
+
+func TestStats_FilterByModel(t *testing.T) {
+	ts, path := newStatsTestServer(t)
+	defer ts.Close()
+
+	seedRecords(t, path,
+		feedback.FeedbackRecord{Consumer: "forge", Role: "coder", Model: "qwen3-coder:30b", Outcome: "success"},
+		feedback.FeedbackRecord{Consumer: "forge", Role: "coder", Model: "qwen3-coder:30b", Outcome: "failure"},
+		feedback.FeedbackRecord{Consumer: "other", Role: "reviewer", Model: "claude-sonnet-4-6", Outcome: "success"},
+	)
+
+	status, stats := getStats(t, ts, "?model=qwen3-coder:30b")
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if stats.TaskCount != 2 {
+		t.Fatalf("expected TaskCount 2, got %d", stats.TaskCount)
+	}
+	if stats.Model != "qwen3-coder:30b" {
+		t.Errorf("expected model echoed back, got %q", stats.Model)
+	}
+}
+
+func TestStats_FilterByRoleConsumerCombined(t *testing.T) {
+	ts, path := newStatsTestServer(t)
+	defer ts.Close()
+
+	seedRecords(t, path,
+		feedback.FeedbackRecord{Consumer: "forge", Role: "coder", Model: "qwen3-coder:30b", Outcome: "success"},
+		feedback.FeedbackRecord{Consumer: "forge", Role: "reviewer", Model: "qwen3-coder:30b", Outcome: "success"},
+		feedback.FeedbackRecord{Consumer: "other", Role: "coder", Model: "qwen3-coder:30b", Outcome: "success"},
+	)
+
+	status, stats := getStats(t, ts, "?consumer=forge&role=coder&model=qwen3-coder:30b")
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if stats.TaskCount != 1 {
+		t.Fatalf("expected TaskCount 1 (AND of all filters), got %d", stats.TaskCount)
+	}
+}
+
+func TestStats_LastN(t *testing.T) {
+	ts, path := newStatsTestServer(t)
+	defer ts.Close()
+
+	seedRecords(t, path,
+		feedback.FeedbackRecord{Consumer: "forge", Outcome: "failure"},
+		feedback.FeedbackRecord{Consumer: "forge", Outcome: "failure"},
+		feedback.FeedbackRecord{Consumer: "forge", Outcome: "failure"},
+		feedback.FeedbackRecord{Consumer: "forge", Outcome: "success"},
+		feedback.FeedbackRecord{Consumer: "forge", Outcome: "success"},
+	)
+
+	status, stats := getStats(t, ts, "?last_n=2")
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if stats.TaskCount != 2 {
+		t.Fatalf("expected TaskCount 2, got %d", stats.TaskCount)
+	}
+	if stats.SuccessRate != 1.0 {
+		t.Errorf("expected SuccessRate 1.0 over the last 2 (both success), got %v", stats.SuccessRate)
+	}
+}
+
+func TestStats_EmptyFile(t *testing.T) {
+	ts, _ := newStatsTestServer(t)
+	defer ts.Close()
+
+	status, stats := getStats(t, ts, "")
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if stats.TaskCount != 0 {
+		t.Fatalf("expected TaskCount 0, got %d", stats.TaskCount)
+	}
+	if stats.SuccessRate != 0 || stats.AvgDurationMS != 0 {
+		t.Errorf("expected zero-valued stats, got %+v", stats)
+	}
+}
+
+func TestStats_WrongMethod(t *testing.T) {
+	ts, _ := newStatsTestServer(t)
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/feedback/stats", nil)
+	req.Header.Set("Authorization", "Bearer "+testAPIKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", resp.StatusCode)
+	}
+}
+
+func TestStats_NegativeLastN(t *testing.T) {
+	ts, _ := newStatsTestServer(t)
+	defer ts.Close()
+
+	status, _ := getStats(t, ts, "?last_n=-1")
+	if status != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", status)
+	}
+
+	status, _ = getStats(t, ts, "?last_n=abc")
+	if status != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", status)
+	}
+}
+
+func TestStats_MissingAuth(t *testing.T) {
+	ts, _ := newStatsTestServer(t)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/v1/feedback/stats")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestStats_WrongToken(t *testing.T) {
+	ts, _ := newStatsTestServer(t)
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/feedback/stats", nil)
+	req.Header.Set("Authorization", "Bearer wrong-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
 func validBody(consumer string) []byte {
 	b, _ := json.Marshal(map[string]any{
 		"consumer": consumer,
