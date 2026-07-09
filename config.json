@@ -14,7 +14,7 @@
   },
 
   "feedback": {
-    "log_path": "",
+    "log_path": "/var/log/costguard/feedback.jsonl",
     "_log_path_example": "/var/log/costguard/feedback.jsonl"
   },
 
